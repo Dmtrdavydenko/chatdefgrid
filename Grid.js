@@ -18,7 +18,9 @@
             commands: [],
             commandsSaved: false,
             selectedCoord: null,
-            overlayDisplay: "grid"
+            overlayDisplay: "grid",
+            recording: false,
+            gifFrames: []
         };
 
         this.mouse = { x: 0, y: 0 };
@@ -167,30 +169,51 @@ F2 - справка
         this.state.gridInvisible = value;
 
 
-        const elements = this.overlay.querySelectorAll(
-            ".grid-item, .point-marker"
+        const cells = this.overlay.querySelectorAll(
+            ".grid-item"
+        );
+
+        const points = this.overlay.querySelectorAll(
+            ".point-marker"
         );
 
 
-        elements.forEach(el => {
+        cells.forEach(el => {
 
             if (value) {
 
-                el.style.visibility = "hidden";
+                // полностью прозрачный, но клики работают
+                el.style.opacity = "0";
 
             } else {
 
-                el.style.visibility = "visible";
+                el.style.opacity = "1";
 
             }
 
         });
 
 
-        const menu = this.overlay.querySelector("#grid-resize-menu");
+        points.forEach(el => {
+
+            el.style.opacity = value ? "0" : "1";
+
+        });
+
+
+        const menu = this.overlay.querySelector(
+            "#grid-resize-menu"
+        );
+
 
         if (menu) {
-            menu.style.display = value ? "none" : "block";
+
+            menu.style.opacity = value ? "0" : "1";
+
+            // важно: панель не должна блокировать страницу
+            menu.style.pointerEvents =
+                value ? "none" : "auto";
+
         }
 
     }
@@ -919,6 +942,131 @@ F2 - справка
             this.setPoint(Number(e.key));
         }
 
+        if (e.key === "F8") {
+
+            e.preventDefault();
+
+            this.startRecord();
+
+            return;
+        }
+
+
+        if (e.key === "F9") {
+
+            e.preventDefault();
+
+            this.stopRecord();
+
+            return;
+        }
+
+    }
+
+    startRecord() {
+
+        if (this.state.recording) return;
+
+
+        this.state.recording = true;
+        this.state.gifFrames = [];
+
+
+        alert("Запись GIF началась");
+
+
+        this.recordTimer = setInterval(() => {
+
+            html2canvas(this.overlay, {
+                backgroundColor: null
+            }).then(canvas => {
+
+                this.state.gifFrames.push(canvas);
+
+            });
+
+
+        }, 1000);
+
+    }
+
+
+
+    stopRecord() {
+
+        if (!this.state.recording) return;
+
+
+        this.state.recording = false;
+
+        clearInterval(this.recordTimer);
+
+
+        alert(
+            "Запись закончена. Кадров: " +
+            this.state.gifFrames.length
+        );
+
+
+        this.makeGif();
+
+    }
+
+
+
+    makeGif() {
+
+
+        const gif = new GIF({
+
+            workers: 2,
+            quality: 10,
+
+            width: window.innerWidth,
+            height: window.innerHeight
+
+        });
+
+
+
+        this.state.gifFrames.forEach(frame => {
+
+            gif.addFrame(frame, {
+
+                delay: 1000
+
+            });
+
+        });
+
+
+
+        gif.on(
+            "finished",
+            blob => {
+
+                const url =
+                    URL.createObjectURL(blob);
+
+
+                const a =
+                    document.createElement("a");
+
+
+                a.href = url;
+                a.download =
+                    "chatdefgrid.gif";
+
+
+                a.click();
+
+            }
+        );
+
+
+
+        gif.render();
+
     }
 
     // Полное удаление класса и его обработчиков
@@ -936,4 +1084,43 @@ F2 - справка
 }
 
 // Запуск
-new GridBuilder();
+//new GridBuilder();
+
+function loadScript(src) {
+
+    return new Promise((resolve, reject) => {
+
+        const script = document.createElement("script");
+
+        script.src = src;
+        script.onload = resolve;
+        script.onerror = reject;
+
+        document.head.appendChild(script);
+
+    });
+
+}
+
+
+async function loadLibraries() {
+
+    await loadScript(
+        "https://html2canvas.hertzen.com/dist/html2canvas.min.js"
+    );
+
+
+    await loadScript(
+        "https://cdn.jsdelivr.net/npm/gif.js.optimized/dist/gif.js"
+    );
+
+
+    console.log("Библиотеки GIF загружены");
+
+
+    new GridBuilder();
+
+}
+
+
+loadLibraries();
