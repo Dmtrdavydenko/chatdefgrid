@@ -1,16 +1,16 @@
 ﻿# chatdefgrid
 
-### Build a grid using the browser console (F12)
+### Build a Grid Using the Browser Console (F12)
 
-Interactive grid builder for browser pages.
+An interactive grid builder for browser pages.
 
-The script creates a coordinate grid by selecting the first cell size and the table boundary.
+The script creates a coordinate grid by defining the size of the first cell and the outer boundary of the table.
 
 ---
 
-## Step 1 — Set the starting corner
+## Step 1 — Set the Starting Corner
 
-Move the mouse to the top-left corner of the first cell and press keyboard key `1`.
+Move the mouse to the top-left corner of the first cell and press `1`.
 
 ```text
 ┌──────┐
@@ -18,13 +18,13 @@ Move the mouse to the top-left corner of the first cell and press keyboard key `
 └──────┘
 ```
 
-Point `1` defines the first corner of the grid cell.
+Point `1` defines the top-left corner of the first cell.
 
 ---
 
-## Step 2 — Set the opposite corner of the first cell
+## Step 2 — Set the Opposite Corner
 
-Move the mouse to the opposite corner of the first cell and press keyboard key `2`.
+Move the mouse to the bottom-right corner of the first cell and press `2`.
 
 ```text
 1──────┐
@@ -32,23 +32,19 @@ Move the mouse to the opposite corner of the first cell and press keyboard key `
 └──────2
 ```
 
-The distance between points `1` and `2` defines:
-
-- cell width
-- cell height
+The distance between points `1` and `2` determines the cell width and height.
 
 ---
 
-## Step 3 — Define the table boundary and build the grid
+## Step 3 — Define the Table Boundary
 
-Move the mouse to the desired bottom-right corner of the table and press keyboard key `3`.
+Move the mouse to the bottom-right corner of the table and press `3`.
 
 The script automatically:
 
-- calculates rows and columns
-- creates the grid
-- fills the selected area with cells
-- adds coordinates
+* Calculates the number of rows and columns.
+* Creates the grid and fills the selected area with cells.
+* Assigns coordinates to each cell.
 
 Example:
 
@@ -64,9 +60,9 @@ Example:
 
 ---
 
-# Grid coordinates
+## Grid Coordinates
 
-Columns use Cyrillic letters:
+Columns use Cyrillic letters, and rows use numbers.
 
 ```text
 А1  Б1  В1
@@ -74,15 +70,13 @@ Columns use Cyrillic letters:
 А3  Б3  В3
 ```
 
-Click any cell to select its coordinate.
-
-The selected coordinate is inserted into commands.
+Click any cell to select its coordinate. The selected coordinate is automatically inserted into commands wherever the `-` placeholder appears.
 
 ---
 
-# Point control panel
+## Point Control Panel
 
-After creating the grid, points `1` and `2` can be adjusted.
+After creating the grid, you can adjust points `1` and `2` using the control panel.
 
 Movement controls:
 
@@ -94,22 +88,20 @@ Movement controls:
         ▼
 ```
 
-Movement step:
+Available movement steps:
 
-```text
-1 px
-0.5 px
-0.1 px
-0.01 px
-```
+* `1 px`
+* `0.5 px`
+* `0.1 px`
+* `0.01 px`
 
-Allows precise grid alignment.
+These controls allow precise grid alignment.
 
 ---
 
-# Commands panel
+## Commands Panel
 
-Commands can be entered in the textarea.
+Enter commands in the text area, with one command per line.
 
 Example:
 
@@ -119,13 +111,14 @@ Example:
 !upgrade;
 ```
 
-Special symbols:
+### Special Characters
 
-`-` is replaced with the selected cell coordinate.
+* `-` — replaced with the currently selected cell coordinate.
+* `;` — marks the end of a command and is removed before sending.
 
 Example:
 
-Before:
+Before selecting a cell:
 
 ```text
 !tower -;
@@ -137,57 +130,64 @@ After selecting cell `А1`:
 !tower А1
 ```
 
-Symbol `;` marks the end of the command and is removed before sending.
+Click **Save** to convert the commands into buttons.
 
-After pressing **Save**, commands become buttons.
-
-Clicking a button sends the message.
+Click a command button to insert the resulting message into the Twitch chat input and trigger the send button.
 
 ---
 
-# Video player
+## Video Player
 
-The script hides the video player while creating and editing the grid.
+The script hides the video player while the grid interface is active.
 
-When the grid interface is hidden, the video player is restored.
-
----
-
-# Keyboard shortcuts
-
-| Key | Action |
-|-----|--------|
-| `1` | Set point 1 (top-left corner of first cell) |
-| `2` | Set point 2 (bottom-right corner of first cell) |
-| `3` | Set table boundary and build grid |
-| `Shift + 1` | Hide/show grid interface |
-| `Shift + 3` | Hide/show grid lines, points and control panel |
-| `F2` | Open help |
-| `Delete` | Remove current grid and start setup again |
-| `Shift + Delete` | Remove script completely |
+Press `Shift + 1` to hide the grid interface and restore the video player. Press it again to show the interface and hide the player.
 
 ---
 
-# Workflow
+## Keyboard Shortcuts
 
-1. Open browser developer console (`F12`).
-2. Run the script.
-3. Move the mouse and press:
-   - `1` — first corner of the cell
-   - `2` — opposite corner of the cell
-   - `3` — table boundary
-4. Adjust points if needed.
-5. Click a cell to select coordinates.
-6. Use command buttons to send messages.
+| Key              | Action                                                    |
+| ---------------- | --------------------------------------------------------- |
+| `1`              | Set point 1 — top-left corner of the first cell           |
+| `2`              | Set point 2 — bottom-right corner of the first cell       |
+| `3`              | Set the table boundary and build the grid                 |
+| `Shift + 1`      | Hide/show the grid interface and toggle the video player  |
+| `Shift + 3`      | Toggle grid transparency while keeping cell clicks active |
+| `F2`             | Open the help dialog                                      |
+| `Delete`         | Clear the current grid and start setup again              |
+| `Shift + Delete` | Remove the script completely                              |
 
 ---
 
-# Notes
+## Transparency Mode
 
-Keyboard shortcuts are disabled while typing in:
+Press `Shift + 3` to toggle the opacity of the grid, point markers, and control panel.
 
-- textarea
-- input fields
-- select menus
+When transparency mode is enabled:
 
-The result is an interactive coordinate grid built directly on top of the browser page.
+* Grid lines and point markers become invisible.
+* Cell click targets remain active, allowing you to select coordinates.
+* The control panel becomes invisible and non-interactive.
+* The grid geometry remains unchanged.
+
+This lets you select cells without visible grid lines covering the underlying page.
+
+---
+
+## Workflow
+
+1. Open the browser developer console with `F12`.
+2. Paste and run the script.
+3. Position the mouse and press `1`, `2`, and `3` to build the grid.
+4. Adjust points `1` and `2` if necessary.
+5. Click a cell to select its coordinate.
+6. Save your commands in the Commands Panel.
+7. Click a command button to send the corresponding message.
+
+---
+
+## Notes
+
+* Keyboard shortcuts are disabled while typing in text fields, text areas, and select menus.
+* The script is designed to run directly in the browser console.
+* For Twitch, the script expects the chat input and send button to be available on the page.
