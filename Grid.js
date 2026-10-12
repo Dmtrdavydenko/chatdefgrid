@@ -667,12 +667,6 @@ F2 - справка
 
                     this.setSelectedCoord(coord);
 
-                    alert(
-                        `Координата сетки:\n\n` +
-                        `Столбец: ${this.cyr(x + 1)}\n` +
-                        `Строка: ${y + 1}\n\n` +
-                        coord
-                    );
                 });
 
                 this.overlay.appendChild(cell);
