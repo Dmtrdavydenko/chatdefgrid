@@ -18,9 +18,7 @@
             commands: [],
             commandsSaved: false,
             selectedCoord: null,
-            overlayDisplay: "grid",
-            recording: false,
-            gifFrames: []
+            overlayDisplay: "grid"
         };
 
         this.mouse = { x: 0, y: 0 };
@@ -31,7 +29,10 @@
         this.createOverlay();
         this.createInfo();
         this.createCommandsPanel();
-        this.hidePlayer();
+
+        this.hidePanel();
+
+        //this.hidePlayer();
 
         this.onMouseMove = this.onMouseMove.bind(this);
         this.onKeyDown = this.onKeyDown.bind(this);
@@ -43,7 +44,15 @@
 
         alert(`
 Readme
-Делал в режиме Theatre mode
+1.Закрыть консль разработчика.`
+        );
+        alert(`
+2.Shift + 1 показать/скрывает оверлей оверлей сетки/твич 
+Использовать лучше с 
+* режимом Theatre mode/Режим кинотеатра
+* Полноэкранный режим F11
+`);
+        alert(`
 Точками 1 и 2 построить диагональ для А1
 Точку 3 поставить в крайний правый низ сетки
 
@@ -219,22 +228,6 @@ F2 - справка
     }
 
     // Создание слоя
-    createOverlay2() {
-        this.overlay = document.createElement("div");
-        this.overlay.id = "grid-builder-overlay";
-
-        Object.assign(this.overlay.style, {
-            position: "fixed",
-            left: "0",
-            top: "0",
-            width: "100vw",
-            height: "100vh",
-            zIndex: "999999",
-            pointerEvents: "none"
-        });
-
-        document.body.appendChild(this.overlay);
-    }
     createOverlay() {
         this.overlay = document.createElement("div");
         this.overlay.id = "grid-builder-overlay";
@@ -288,7 +281,7 @@ F2 - справка
             top: "10px",
             background: "rgba(0,0,0,.8)",
             color: "white",
-            padding: "10px",
+            padding: "8px",
             fontFamily: "monospace",
             fontSize: "14px",
             borderRadius: "5px",
@@ -304,19 +297,47 @@ F2 - справка
     createCommandsPanel() {
         this.commandsPanel = document.createElement("div");
 
+        //Object.assign(this.commandsPanel.style, {
+        //    position: "absolute",
+        //    left: "0",
+        //    top: "95px",
+        //    width: "100%",
+        //    padding: "10px",
+        //    background: "rgba(0,0,0,.85)",
+        //    color: "white",
+        //    fontFamily: "monospace",
+        //    fontSize: "13px",
+        //    borderRadius: "5px",
+        //    pointerEvents: "auto",
+        //    boxSizing: "border-box"
+        //});
         Object.assign(this.commandsPanel.style, {
             position: "absolute",
+
             left: "0",
             top: "95px",
+            bottom: "0",
+
             width: "100%",
-            padding: "10px",
+            height: "calc(100vh - 95px)",
+
+            padding: "0px",
+
             background: "rgba(0,0,0,.85)",
             color: "white",
+
             fontFamily: "monospace",
             fontSize: "13px",
+
             borderRadius: "5px",
+
             pointerEvents: "auto",
-            boxSizing: "border-box"
+            boxSizing: "border-box",
+
+            overflowY: "auto",
+
+            scrollbarWidth: "none",
+            msOverflowStyle: "none"
         });
 
         this.zone1.appendChild(this.commandsPanel);
@@ -327,54 +348,169 @@ F2 - справка
     showCommandsEditor() {
         this.commandsPanel.innerHTML = "";
 
-        const textarea = document.createElement("textarea");
-        textarea.placeholder =
-            " - заменяется на координату;\n!башня -;\n!холод -;\n!улучшить;";
-        textarea.value = this.state.commands.join("\n");
-
-        Object.assign(textarea.style, {
-            display: "block",
-            width: "100%",
-            height: "130px",
-            boxSizing: "border-box",
-            resize: "vertical",
-            fontFamily: "monospace",
-            fontSize: "13px",
-            marginBottom: "8px"
-        });
 
         const saveButton = document.createElement("button");
-        saveButton.textContent = "Сохранить";
+
+        saveButton.textContent = "💾 Сохранить";
+
         saveButton.type = "button";
+
 
         Object.assign(saveButton.style, {
             display: "block",
             width: "100%",
+
             boxSizing: "border-box",
-            padding: "7px",
-            cursor: "pointer"
+
+            padding: "10px",
+            marginBottom: "10px",
+
+            cursor: "pointer",
+
+            background: "linear-gradient(135deg, #9147ff, #5c2d99)",
+
+            color: "white",
+
+            border: "none",
+            borderRadius: "8px",
+
+            fontFamily: "monospace",
+            fontSize: "14px",
+            fontWeight: "bold"
         });
 
+
+
+        const textarea = document.createElement("textarea");
+
+        textarea.placeholder =
+            " - заменяется на координату;\n!башня -;\n!холод -;\n!улучшить;";
+
+
+        textarea.value = this.state.commands.join("\n");
+
+
+
+        Object.assign(textarea.style, {
+
+            display: "block",
+
+            width: "100%",
+            height: "calc(100vh - 180px)",
+
+            boxSizing: "border-box",
+
+            resize: "none",
+
+            padding: "3px",
+
+            background: "#18181b",
+
+            color: "#efeff1",
+
+            border: "1px solid #3a3a3d",
+
+            borderRadius: "8px",
+
+            outline: "none",
+
+            fontFamily: "monospace",
+
+            fontSize: "14px",
+
+            lineHeight: "1.5"
+        });
+
+
+
         saveButton.addEventListener("click", () => {
+
             this.state.commands = textarea.value
                 .split("\n")
                 .map(line => line.trim())
                 .filter(Boolean);
 
+
             this.state.commandsSaved = true;
+
             this.showCommandsButtons();
+
         });
 
-        this.commandsPanel.append(textarea, saveButton);
+
+
+        this.commandsPanel.append(
+            saveButton,
+            textarea
+        );
     }
 
     showCommandsButtons() {
         this.commandsPanel.innerHTML = "";
 
+
+        // Кнопка редактирования сверху
+        const editButton = document.createElement("button");
+
+        editButton.type = "button";
+        editButton.textContent = "⚙ Изменить команды";
+
+
+        Object.assign(editButton.style, {
+            display: "block",
+            width: "100%",
+
+            boxSizing: "border-box",
+
+            padding: "10px",
+            marginBottom: "10px",
+
+            cursor: "pointer",
+
+            background: "linear-gradient(135deg, #9147ff, #5c2d99)",
+            color: "#fff",
+
+            border: "1px solid rgba(255,255,255,.25)",
+            borderRadius: "10px",
+
+            fontFamily: "monospace",
+            fontSize: "14px",
+            fontWeight: "bold",
+
+            boxShadow: "0 4px 10px rgba(0,0,0,.3)"
+        });
+
+
+        editButton.addEventListener("click", () => {
+            this.showCommandsEditor();
+        });
+
+
+        this.commandsPanel.appendChild(editButton);
+
+
+
+        // Контейнер списка команд
+        const list = document.createElement("div");
+
+        Object.assign(list.style, {
+            overflowY: "auto",
+
+            height: "calc(100vh - 170px)",
+
+            paddingRight: "4px",
+
+            scrollbarWidth: "none",
+            msOverflowStyle: "none"
+        });
+
+
         this.state.commands.forEach(command => {
 
             const button = document.createElement("button");
+
             button.type = "button";
+
 
             button.textContent = (
                 this.state.selectedCoord
@@ -383,17 +519,79 @@ F2 - справка
             ).replace(/;\s*$/, "");
 
 
+
             Object.assign(button.style, {
                 display: "block",
                 width: "100%",
+
                 boxSizing: "border-box",
-                padding: "7px",
-                marginBottom: "5px",
+
+                padding: "5px 8px",
+                marginBottom: "8px",
+
                 textAlign: "left",
                 cursor: "pointer",
+
                 whiteSpace: "normal",
-                overflowWrap: "anywhere"
+                overflowWrap: "anywhere",
+
+                background: "linear-gradient(135deg, #333, #222)",
+                color: "#fff",
+
+                border: "1px solid rgba(255,255,255,.15)",
+                borderRadius: "10px",
+
+                fontFamily: "monospace",
+                fontSize: "14px",
+                fontWeight: "600",
+
+                boxShadow: "0 4px 10px rgba(0,0,0,.25)",
+
+                transition: "all .15s ease",
+
+                userSelect: "none"
             });
+
+
+
+            button.addEventListener("mouseenter", () => {
+
+                button.style.background =
+                    "linear-gradient(135deg, #4a4a4a, #2d2d2d)";
+
+                button.style.transform =
+                    "translateY(-2px)";
+
+                button.style.boxShadow =
+                    "0 6px 14px rgba(0,0,0,.35)";
+            });
+
+
+
+            button.addEventListener("mouseleave", () => {
+
+                button.style.background =
+                    "linear-gradient(135deg, #333, #222)";
+
+                button.style.transform =
+                    "translateY(0)";
+
+                button.style.boxShadow =
+                    "0 4px 10px rgba(0,0,0,.25)";
+            });
+
+
+
+            button.addEventListener("mousedown", () => {
+                button.style.transform = "scale(.97)";
+            });
+
+
+
+            button.addEventListener("mouseup", () => {
+                button.style.transform = "translateY(-2px)";
+            });
+
 
 
             button.addEventListener("click", () => {
@@ -405,39 +603,23 @@ F2 - справка
                 ).replace(/;\s*$/, "");
 
 
-                alert(finalCommand);
 
-                this.twitchSend(finalCommand);
+                if (confirm(
+                    "Отправить сообщение?\n\n" + finalCommand
+                )) {
+                    this.twitchSend(finalCommand);
+                }
 
             });
 
 
-            this.commandsPanel.appendChild(button);
+
+            list.appendChild(button);
+
         });
 
 
-        const editButton = document.createElement("button");
-
-        editButton.type = "button";
-        editButton.textContent = "Изменить";
-
-
-        Object.assign(editButton.style, {
-            display: "block",
-            width: "100%",
-            boxSizing: "border-box",
-            padding: "7px",
-            marginTop: "5px",
-            cursor: "pointer"
-        });
-
-
-        editButton.addEventListener("click", () => {
-            this.showCommandsEditor();
-        });
-
-
-        this.commandsPanel.appendChild(editButton);
+        this.commandsPanel.appendChild(list);
     }
 
     setSelectedCoord(coord) {
@@ -470,29 +652,18 @@ F2 - справка
 
         this.player.style.display = "none";
     }
-    hidePlayer2() {
 
-        const video = document.querySelector(
-            'video[aria-label="Twitch video player"]'
-        );
+    //
 
-        if (!video) return;
+    hidePanel() {
+        // Сохраняем исходный display перед скрытием
+        this.state.overlayDisplay = this.overlay.style.display;
 
-
-        const target = video.nextElementSibling;
-
-
-        if (!target) return;
+        this.overlay.style.display = "none";
+        this.state.visible = false;
 
 
-        this.player = target;
-
-        this.previousDisplay = target.style.display;
-
-
-        target.style.display = "none";
     }
-
     restorePlayer() {
         if (!this.player) return;
 
@@ -503,7 +674,13 @@ F2 - справка
 
         this.player = null;
     }
+    restorePanel() {
+        // Восстанавливаем сохранённый display
+        this.overlay.style.display =
+            this.state.overlayDisplay || "grid";
 
+        this.state.visible = true;
+    }
     // Установка точки
     setPoint(number) {
         this.hidePlayer();
@@ -750,6 +927,12 @@ F2 - справка
                     <div class="move-controls" data-point="2"></div>
                 </div>
 
+                <div style="border-top:1px solid #666;padding-top:10px;margin-top:12px">
+                    <b>Точка 3</b>
+                    <div id="grid-p3-coords" style="margin:6px 0"></div>
+                    <div class="move-controls" data-point="3"></div>
+                </div>
+
                 <div style="border-top:1px solid #666;padding-top:10px;margin-top:12px;line-height:1.8">
                     Столбцов: <span id="grid-cols-value"></span><br>
                     Строк: <span id="grid-rows-value"></span>
@@ -798,8 +981,7 @@ F2 - справка
                         button.addEventListener("click", () => {
                             const p = this.state["p" + pointNumber];
 
-                            if (!p || !this.state.p1 ||
-                                !this.state.p2 || !this.state.p3) {
+                            if (!p) {
                                 return;
                             }
 
@@ -812,6 +994,10 @@ F2 - справка
 
                             this.addPoint(p, pointNumber);
                             this.createGrid();
+
+                            if (this.state.p3) {
+                                this.addPoint(this.state.p3, 3);
+                            }
                         });
                     }
 
@@ -825,6 +1011,11 @@ F2 - справка
 
         menu.querySelector("#grid-p2-coords").textContent =
             `X: ${this.state.p2.x.toFixed(2)} | Y: ${this.state.p2.y.toFixed(2)}`;
+
+        if (this.state.p3) {
+            menu.querySelector("#grid-p3-coords").textContent =
+                `X: ${this.state.p3.x.toFixed(2)} | Y: ${this.state.p3.y.toFixed(2)}`;
+        }
 
         menu.querySelector("#grid-cols-value").textContent = this.state.cols;
         menu.querySelector("#grid-rows-value").textContent = this.state.rows;
@@ -892,19 +1083,11 @@ F2 - справка
             e.preventDefault();
 
             if (this.state.visible) {
-                // Сохраняем исходный display перед скрытием
-                this.state.overlayDisplay = this.overlay.style.display;
-
-                this.overlay.style.display = "none";
-                this.state.visible = false;
-
+                this.hidePanel();
                 this.restorePlayer();
             } else {
                 // Восстанавливаем сохранённый display
-                this.overlay.style.display =
-                    this.state.overlayDisplay || "grid";
-
-                this.state.visible = true;
+                this.restorePanel();
                 this.hidePlayer();
             }
 
@@ -941,132 +1124,6 @@ F2 - справка
             e.preventDefault();
             this.setPoint(Number(e.key));
         }
-
-        if (e.key === "F8") {
-
-            e.preventDefault();
-
-            this.startRecord();
-
-            return;
-        }
-
-
-        if (e.key === "F9") {
-
-            e.preventDefault();
-
-            this.stopRecord();
-
-            return;
-        }
-
-    }
-
-    startRecord() {
-
-        if (this.state.recording) return;
-
-
-        this.state.recording = true;
-        this.state.gifFrames = [];
-
-
-        alert("Запись GIF началась");
-
-
-        this.recordTimer = setInterval(() => {
-
-            html2canvas(this.overlay, {
-                backgroundColor: null
-            }).then(canvas => {
-
-                this.state.gifFrames.push(canvas);
-
-            });
-
-
-        }, 1000);
-
-    }
-
-
-
-    stopRecord() {
-
-        if (!this.state.recording) return;
-
-
-        this.state.recording = false;
-
-        clearInterval(this.recordTimer);
-
-
-        alert(
-            "Запись закончена. Кадров: " +
-            this.state.gifFrames.length
-        );
-
-
-        this.makeGif();
-
-    }
-
-
-
-    makeGif() {
-
-
-        const gif = new GIF({
-
-            workers: 2,
-            quality: 10,
-
-            width: window.innerWidth,
-            height: window.innerHeight
-
-        });
-
-
-
-        this.state.gifFrames.forEach(frame => {
-
-            gif.addFrame(frame, {
-
-                delay: 1000
-
-            });
-
-        });
-
-
-
-        gif.on(
-            "finished",
-            blob => {
-
-                const url =
-                    URL.createObjectURL(blob);
-
-
-                const a =
-                    document.createElement("a");
-
-
-                a.href = url;
-                a.download =
-                    "chatdefgrid.gif";
-
-
-                a.click();
-
-            }
-        );
-
-
-
-        gif.render();
-
     }
 
     // Полное удаление класса и его обработчиков
@@ -1084,43 +1141,4 @@ F2 - справка
 }
 
 // Запуск
-//new GridBuilder();
-
-function loadScript(src) {
-
-    return new Promise((resolve, reject) => {
-
-        const script = document.createElement("script");
-
-        script.src = src;
-        script.onload = resolve;
-        script.onerror = reject;
-
-        document.head.appendChild(script);
-
-    });
-
-}
-
-
-async function loadLibraries() {
-
-    await loadScript(
-        "https://html2canvas.hertzen.com/dist/html2canvas.min.js"
-    );
-
-
-    await loadScript(
-        "https://cdn.jsdelivr.net/npm/gif.js.optimized/dist/gif.js"
-    );
-
-
-    console.log("Библиотеки GIF загружены");
-
-
-    new GridBuilder();
-
-}
-
-
-loadLibraries();
+new GridBuilder();
