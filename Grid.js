@@ -32,6 +32,9 @@
         this.previousDisplay = "";
         this.playerWasHidden = false;
 
+        this.layers = { grid: null };
+        this._layerHandlers = null;
+
         this.createOverlay();
         this.createInfo();
         this.createCommandsPanel();
@@ -84,54 +87,14 @@ F2 - справка
     // Построение сетки
 
     createGrid() {
-        const { p1, p2, p3 } = this.state;
-        if (!p1 || !p2 || !p3) return false;
+        const res = this._applyGeometry();
+        if (res.error) return false;
 
-        if (p2.x <= p1.x || p2.y <= p1.y) {
-            this.info.textContent = "Точка 2 должна быть правее и ниже точки 1";
-            return false;
-        }
-        if (p3.x <= p1.x || p3.y <= p1.y) {
-            this.info.textContent = "Точка 3 должна быть правее и ниже точки 1";
-            return false;
-        }
-
-        const cellW = p2.x - p1.x;
-        const cellH = p2.y - p1.y;
-
-        if (cellW < 1 || cellH < 1) {
-            this.info.textContent = "Ячейка слишком маленькая";
-            return false;
-        }
-
-        const MAX = 200;
-        const rawCols = Math.floor((p3.x - p1.x) / cellW);
-        const rawRows = Math.floor((p3.y - p1.y) / cellH);
-
-        if (rawCols < 1 || rawRows < 1) {
-            this.info.textContent = "Слишком мало ячеек";
-            return false;
-        }
-        if (rawCols > MAX || rawRows > MAX) {
-            this.info.textContent =
-                `Слишком большая сетка (${rawCols}×${rawRows}). Максимум ${MAX}×${MAX}.`;
-            return false;
-        }
-
-        this.state.cellW = cellW;
-        this.state.cellH = cellH;
-        this.state.cols = rawCols;
-        this.state.rows = rawRows;
-
-        // Удаляем старую сетку, подписи и меню (маркеры точек остаются).
         this.clearGrid();
-
-        // Строим заново.
         this.buildGridLayer();
         this.buildColLabels();
         this.buildRowLabels();
         this.createResizeMenu();
-
         return true;
     }
 
@@ -153,7 +116,6 @@ F2 - справка
             backgroundSize: `${cellW}px ${cellH}px`,
             pointerEvents: "auto",
             zIndex: "999998",
-            // рамка по периметру, чтобы границы были видны чётко
             boxShadow: "inset 0 0 0 1px rgba(0,120,255,.55)"
         });
 
@@ -170,7 +132,8 @@ F2 - справка
         });
         layer.appendChild(hover);
 
-        layer.addEventListener("mousemove", (e) => {
+        // --- Обработчики сохраняем в this._layerHandlers ---
+        const onMouseMove = (e) => {
             const rect = layer.getBoundingClientRect();
             const x = Math.floor((e.clientX - rect.left) / cellW);
             const y = Math.floor((e.clientY - rect.top) / cellH);
@@ -185,14 +148,13 @@ F2 - справка
             hover.style.top = (y * cellH) + "px";
             hover.style.width = cellW + "px";
             hover.style.height = cellH + "px";
-        });
+        };
 
-        layer.addEventListener("mouseleave", () => {
+        const onMouseLeave = () => {
             hover.style.display = "none";
-        });
+        };
 
-        // --- Клик → выбранная координата ---
-        layer.addEventListener("click", (e) => {
+        const onClick = (e) => {
             const rect = layer.getBoundingClientRect();
             const x = Math.floor((e.clientX - rect.left) / cellW);
             const y = Math.floor((e.clientY - rect.top) / cellH);
@@ -200,10 +162,15 @@ F2 - справка
             if (x < 0 || y < 0 || x >= cols || y >= rows) return;
 
             this.setSelectedCoord(`${this.cyr(x + 1)}${y + 1}`);
-        });
+        };
+
+        this._layerHandlers = { onMouseMove, onMouseLeave, onClick };
+
+        layer.addEventListener("mousemove", onMouseMove);
+        layer.addEventListener("mouseleave", onMouseLeave);
+        layer.addEventListener("click", onClick);
 
         this.overlay.appendChild(layer);
-        this.layers = this.layers || {};
         this.layers.grid = layer;
     }
 
@@ -267,7 +234,7 @@ F2 - справка
 
     layoutGrid() {
         const { p1, cellW, cellH, cols, rows } = this.state;
-        const layer = this.layers && this.layers.grid;
+        const layer = this.layers.grid;
         if (!layer) return;
 
         // Слой сетки.
@@ -291,12 +258,109 @@ F2 - справка
             el.style.display = cellH >= 14 ? "block" : "none";
         });
 
-        // Маркеры точек.
+    }
+
+
+    _clearFadeTimers() {
+        clearTimeout(this.gridFadeTimer);
+        this.gridFadeTimer = null;
+        if (this.gridFadeFrame) {
+            cancelAnimationFrame(this.gridFadeFrame);
+            this.gridFadeFrame = null;
+        }
+    }
+
+    _refreshPoints() {
         [1, 2, 3].forEach(n => {
-            if (this.state["p" + n]) {
-                this.addPoint(this.state["p" + n], n);
-            }
+            const p = this.state["p" + n];
+            if (p) this.addPoint(p, n);
         });
+    }
+
+    _computeGeometry() {
+        const { p1, p2, p3 } = this.state;
+        if (!p1 || !p2 || !p3) return { error: "Не все точки заданы" };
+
+        const cellW = p2.x - p1.x;
+        const cellH = p2.y - p1.y;
+        if (cellW < 1 || cellH < 1) return { error: "Ячейка слишком маленькая" };
+        if (p2.x <= p1.x || p2.y <= p1.y) return { error: "Точка 2 должна быть правее и ниже точки 1" };
+        if (p3.x <= p1.x || p3.y <= p1.y) return { error: "Точка 3 должна быть правее и ниже точки 1" };
+
+        const cols = Math.floor((p3.x - p1.x) / cellW);
+        const rows = Math.floor((p3.y - p1.y) / cellH);
+        if (cols < 1 || rows < 1) return { error: "Слишком мало ячеек" };
+        if (cols > 200 || rows > 200) return { error: `Слишком большая сетка (${cols}×${rows}). Максимум 200×200.` };
+
+        return { cellW, cellH, cols, rows };
+    }
+
+    _applyGeometry() {
+        const geo = this._computeGeometry();
+        if (geo.error) {
+            this.info.textContent = geo.error;
+            this._resetGeometry();
+            return { error: geo.error };
+        }
+        const changed =
+            geo.cols !== this.state.cols ||
+            geo.rows !== this.state.rows ||
+            geo.cellW !== this.state.cellW ||
+            geo.cellH !== this.state.cellH;
+
+        this.state.cellW = geo.cellW;
+        this.state.cellH = geo.cellH;
+        this.state.cols = geo.cols;
+        this.state.rows = geo.rows;
+
+        return { changed };
+    }
+
+    _movePoint(pointNumber, dx, dy) {
+        const point = this.state["p" + pointNumber];
+        if (!point) return;
+        const menu = this.overlay.querySelector("#grid-resize-menu");
+        if (!menu) return;
+
+        const step = Number(menu.querySelector("#grid-move-step").value);
+        const oldX = point.x, oldY = point.y;
+
+        point.x += dx * step;
+        point.y += dy * step;
+
+        const res = this._applyGeometry();
+        if (res.error) {
+            // Откат.
+            point.x = oldX;
+            point.y = oldY;
+            this._applyGeometry();      // вернуть валидное состояние
+            this.createGrid();
+            this._refreshPoints();
+            this.startGridFadeTimer();
+            return;
+        }
+
+        if (res.changed) this.createGrid();
+        else this.layoutGrid();
+
+        this._refreshPoints();
+
+        if (this.state.activeGridId !== null) this.updateActiveGrid();
+        this.startGridFadeTimer();
+    }
+
+    _resetGeometry() {
+        this.state.cellW = 0;
+        this.state.cellH = 0;
+        this.state.cols = 0;
+        this.state.rows = 0;
+    }
+
+    _finishGridSetup() {
+        this._refreshPoints();
+        this.setGridInvisible(false);
+        this.startGridFadeTimer();
+        this.updateSavedGridsPanel();
     }
 
 
@@ -400,12 +464,8 @@ F2 - справка
     }
 
     setGridInvisible(value) {
-        clearTimeout(this.gridFadeTimer);
-        this.gridFadeTimer = null;
-        if (this.gridFadeFrame) {
-            cancelAnimationFrame(this.gridFadeFrame);
-            this.gridFadeFrame = null;
-        }
+        this._clearFadeTimers();
+
         this.state.gridInvisible = value;
 
         const elements = this.overlay.querySelectorAll(
@@ -530,6 +590,17 @@ F2 - справка
         });
 
         this.zone1.appendChild(this.commandsPanel);
+        this.commandsPanel.addEventListener("click", (e) => {
+            const btn = e.target.closest(".cmd-btn");
+            if (btn) {
+                const i = Number(btn.dataset.index);
+                const command = this.state.commands[i];
+                if (command) this.twitchSend(this._renderCommand(command));
+                return;
+            }
+            const edit = e.target.closest(".cmd-edit");
+            if (edit) this.showCommandsEditor();
+        });
         this.showCommandsEditor();
     }
 
@@ -637,77 +708,45 @@ F2 - справка
     showCommandsButtons() {
         this.commandsPanel.innerHTML = "";
 
-
-        // Кнопка редактирования сверху
         const editButton = document.createElement("button");
-
         editButton.type = "button";
+        editButton.className = "cmd-edit";
         editButton.textContent = "⚙ Изменить команды";
-
 
         Object.assign(editButton.style, {
             display: "block",
             width: "100%",
-
             boxSizing: "border-box",
-
             padding: "10px",
             marginBottom: "10px",
-
             cursor: "pointer",
-
             background: "linear-gradient(135deg, #9147ff, #5c2d99)",
             color: "#fff",
-
             border: "1px solid rgba(255,255,255,.25)",
             borderRadius: "10px",
-
             fontFamily: "monospace",
             fontSize: "14px",
             fontWeight: "bold",
-
             boxShadow: "0 4px 10px rgba(0,0,0,.3)"
         });
 
-
-        editButton.addEventListener("click", () => {
-            this.showCommandsEditor();
-        });
-
-
         this.commandsPanel.appendChild(editButton);
 
-
-
-        // Контейнер списка команд
         const list = document.createElement("div");
-
         Object.assign(list.style, {
             overflowY: "auto",
-
             height: "calc(100vh - 170px)",
-
             paddingRight: "4px",
-
             scrollbarWidth: "none",
             msOverflowStyle: "none"
         });
 
-
-        this.state.commands.forEach(command => {
-
+        this.state.commands.forEach((command, i) => {
             const button = document.createElement("button");
-
             button.type = "button";
-
-
-            button.textContent = (
-                this.state.selectedCoord
-                    ? command.replace(/\{coord\}/g, this.state.selectedCoord)
-                    : command
-            ).replace(/;\s*$/, "");
-
-
+            button.className = "cmd-btn";
+            button.dataset.index = i;
+            button.textContent = this._renderCommand(command);
 
             Object.assign(button.style, {
                 display: "block",
@@ -732,76 +771,28 @@ F2 - справка
                 opacity: "0.7"
             });
 
-
-
-            button.addEventListener("mouseenter", () => {
-
-                button.style.background =
-                    "linear-gradient(135deg, #4a4a4a, #2d2d2d)";
-
-                button.style.transform =
-                    "translateY(-2px)";
-
-                button.style.boxShadow =
-                    "0 6px 14px rgba(0,0,0,.35)";
-            });
-
-
-
-            button.addEventListener("mouseleave", () => {
-
-                button.style.background =
-                    "linear-gradient(135deg, #333, #222)";
-
-                button.style.transform =
-                    "translateY(0)";
-
-                button.style.boxShadow =
-                    "0 4px 10px rgba(0,0,0,.25)";
-            });
-
-
-
-            button.addEventListener("mousedown", () => {
-                button.style.transform = "scale(.97)";
-            });
-
-
-
-            button.addEventListener("mouseup", () => {
-                button.style.transform = "translateY(-2px)";
-            });
-
-
-
-            button.addEventListener("click", () => {
-
-                const finalCommand = (
-                    this.state.selectedCoord
-                        ? command.replace(/\{coord\}/g, this.state.selectedCoord)
-                        : command
-                ).replace(/;\s*$/, "");
-
-                this.twitchSend(finalCommand);
-
-            });
-
-
-
             list.appendChild(button);
-
         });
 
-
         this.commandsPanel.appendChild(list);
+    }
+
+    _renderCommand(command) {
+        const text = this.state.selectedCoord
+            ? command.replace(/\{coord\}/g, this.state.selectedCoord)
+            : command;
+        return text.replace(/;\s*$/, "");
     }
 
     setSelectedCoord(coord) {
         this.state.selectedCoord = coord;
 
-        if (this.state.commandsSaved) {
-            this.showCommandsButtons();
-        }
+        if (!this.state.commandsSaved) return;
+
+        this.commandsPanel.querySelectorAll(".cmd-btn").forEach(btn => {
+            const i = Number(btn.dataset.index);
+            btn.textContent = this._renderCommand(this.state.commands[i]);
+        });
     }
 
     onMouseMove(e) {
@@ -875,11 +866,9 @@ F2 - справка
         }
 
         if (number === 3) {
-            this.createGrid();
-
-            // Автоматически сохраняем готовую сетку
+            if (!this.createGrid()) return;
             this.saveCurrentGrid();
-
+            this._finishGridSetup();
             this.info.innerHTML = `
         Сетка готова. Shift + s сохранить сетку. Shift + 3 прозрачная сетка
 
@@ -888,6 +877,7 @@ F2 - справка
         Нажми F2 для справки
     `;
         }
+
     }
 
     // Создание или обновление маркера
@@ -943,12 +933,22 @@ F2 - справка
 
 
     clearGrid() {
+        // Снимаем обработчики слоя явно.
+        if (this.layers.grid && this._layerHandlers) {
+            const l = this.layers.grid;
+            l.removeEventListener("mousemove", this._layerHandlers.onMouseMove);
+            l.removeEventListener("mouseleave", this._layerHandlers.onMouseLeave);
+            l.removeEventListener("click", this._layerHandlers.onClick);
+            this._layerHandlers = null;
+        }
+
+        // Удаляем слой сетки, подписи и hover.
         this.overlay.querySelectorAll(".grid-item").forEach(el => el.remove());
 
-        const menu = this.overlay.querySelector("#grid-resize-menu");
-        if (menu) menu.remove();
+        // Меню управления оставляем — оно переиспользуется.
+        // (удаляется только в clearAll и destroy)
 
-        if (this.layers) this.layers.grid = null;
+        this.layers.grid = null;
     }
 
 
@@ -979,6 +979,7 @@ F2 - справка
         if (!p1 || !p2 || !p3) return;
 
         let menu = this.overlay.querySelector("#grid-resize-menu");
+        const prevStep = this.overlay.querySelector("#grid-move-step")?.value;
 
         if (!menu) {
             menu = document.createElement("div");
@@ -998,7 +999,8 @@ F2 - справка
                 fontSize: "12px",
                 borderRadius: "8px",
                 pointerEvents: "auto",
-                boxSizing: "border-box"
+                boxSizing: "border-box",
+                zIndex: "1000000"
             });
 
             menu.innerHTML = `
@@ -1031,18 +1033,30 @@ F2 - справка
             </div>
         `;
 
+            menu.addEventListener("click", (e) => {
+                const btn = e.target.closest(".move-btn");
+                if (!btn || btn.disabled) return;
+                const pointNumber = Number(btn.dataset.point);
+                const dx = Number(btn.dataset.dx);
+                const dy = Number(btn.dataset.dy);
+                if (!dx && !dy) return;
+                this._movePoint(pointNumber, dx, dy);
+            });
+
             this.zone3.appendChild(menu);
 
             menu.querySelectorAll(".move-controls").forEach(controls => {
                 this.createMoveControls(controls, menu);
             });
         }
-
+        if (prevStep !== undefined) {
+            menu.querySelector("#grid-move-step").value = prevStep;
+        }
         this.updateResizeMenuValues(menu);
     }
 
 
-    createMoveControls(controls, menu) {
+    createMoveControls(controls) {
         Object.assign(controls.style, {
             display: "grid",
             gridTemplateColumns: "repeat(3, 1fr)",
@@ -1070,6 +1084,13 @@ F2 - справка
             button.disabled = !label;
             button.title = label ? `Переместить точку ${pointNumber}` : "";
 
+            if (label) {
+                button.className = "move-btn";
+                button.dataset.point = pointNumber;
+                button.dataset.dx = dx;
+                button.dataset.dy = dy;
+            }
+
             Object.assign(button.style, {
                 minHeight: "30px",
                 cursor: label ? "pointer" : "default",
@@ -1080,75 +1101,8 @@ F2 - справка
                 fontSize: "16px"
             });
 
-            if (label) {
-                button.addEventListener("click", () => {
-                    const point = this.state["p" + pointNumber];
-                    if (!point) return;
-
-                    const step = Number(menu.querySelector("#grid-move-step").value);
-                    const oldX = point.x, oldY = point.y;
-
-                    point.x += dx * step;
-                    point.y += dy * step;
-
-                    const res = this.recalcGeometry();
-                    if (!res) {
-                        // Откат.
-                        point.x = oldX;
-                        point.y = oldY;
-                        this.recalcGeometry();
-                        this.createGrid();      // вернуть валидное состояние
-                        this.addPoint(point, pointNumber);
-                        return;
-                    }
-
-                    if (res.changed) {
-                        this.createGrid();      // структура поменялась — пересобрать
-                    } else {
-                        this.layoutGrid();      // только сдвиг — быстро
-                    }
-
-                    [1, 2, 3].forEach(n => {
-                        if (this.state["p" + n]) this.addPoint(this.state["p" + n], n);
-                    });
-
-                    if (this.state.activeGridId !== null) this.updateActiveGrid();
-                    this.startGridFadeTimer();
-                });
-            }
-
             controls.appendChild(button);
         });
-    }
-
-
-    recalcGeometry() {
-        const { p1, p2, p3 } = this.state;
-        if (!p1 || !p2 || !p3) return false;
-
-        const cellW = p2.x - p1.x;
-        const cellH = p2.y - p1.y;
-        if (cellW < 1 || cellH < 1) return false;
-        if (p2.x <= p1.x || p2.y <= p1.y) return false;
-        if (p3.x <= p1.x || p3.y <= p1.y) return false;
-
-        const cols = Math.floor((p3.x - p1.x) / cellW);
-        const rows = Math.floor((p3.y - p1.y) / cellH);
-        if (cols < 1 || rows < 1) return false;
-        if (cols > 200 || rows > 200) return false;
-
-        const changed =
-            cols !== this.state.cols ||
-            rows !== this.state.rows ||
-            cellW !== this.state.cellW ||
-            cellH !== this.state.cellH;
-
-        this.state.cellW = cellW;
-        this.state.cellH = cellH;
-        this.state.cols = cols;
-        this.state.rows = rows;
-
-        return { changed };
     }
 
     updateResizeMenuValues(menu) {
@@ -1172,20 +1126,18 @@ F2 - справка
 
     clearAll() {
         // Останавливаем таймеры прозрачности.
-        clearTimeout(this.gridFadeTimer);
-        this.gridFadeTimer = null;
+        this._clearFadeTimers();
 
-        if (this.gridFadeFrame) {
-            cancelAnimationFrame(this.gridFadeFrame);
-            this.gridFadeFrame = null;
-        }
 
         // Запоминаем ID активного слота.
         const activeId = this.state.activeGridId;
 
-        // Удаляем сетку, точки и меню управления.
+        // Снимаем обработчики слоя и удаляем сетку.
+        this.clearGrid();
+
+        // Точки и меню — вручную.
         this.overlay.querySelectorAll(
-            ".grid-item, .point-marker, #grid-resize-menu"
+            ".point-marker, #grid-resize-menu"
         ).forEach(el => el.remove());
 
         // Удаляем активный слот сохранения.
@@ -1346,6 +1298,7 @@ F2 - справка
             Math.abs(grid.p3.y - grid.p1.y) / cellH
         );
 
+        if (cols <= 0 || rows <= 0) return "Новая сетка";
         return `${this.cyr(cols)}${rows}`;
     }
 
@@ -1396,12 +1349,8 @@ F2 - справка
         }
 
         // Останавливаем предыдущий таймер исчезновения.
-        clearTimeout(this.gridFadeTimer);
+        this._clearFadeTimers();
 
-        if (this.gridFadeFrame) {
-            cancelAnimationFrame(this.gridFadeFrame);
-            this.gridFadeFrame = null;
-        }
 
         // Загружаем координаты.
         this.state.p1 = { ...grid.p1 };
@@ -1416,17 +1365,21 @@ F2 - справка
         this.restorePanel();
 
         // Перестраиваем сетку и маркеры.
-        this.createGrid();
+        if (!this.createGrid()) {
+            console.error("Не удалось построить сетку из сохранённых данных:", grid);
+            return;
+        }
 
-        this.addPoint(this.state.p1, 1);
-        this.addPoint(this.state.p2, 2);
-        this.addPoint(this.state.p3, 3);
+            //this.addPoint(this.state.p1, 1);
+            //this.addPoint(this.state.p2, 2);
+            //this.addPoint(this.state.p3, 3);
 
         // Показываем сетку и запускаем новый таймер.
-        this.setGridInvisible(false);
-        this.startGridFadeTimer();
+        //this.setGridInvisible(false);
+        //this.startGridFadeTimer();
 
-        this.updateSavedGridsPanel();
+        //this.updateSavedGridsPanel();
+        this._finishGridSetup();
     }
 
     // HTML-панель сохранённых сеток
@@ -1464,58 +1417,62 @@ F2 - справка
 
         //document.body.appendChild(panel);
         this.zone4.appendChild(panel);
+        panel.addEventListener("click", (e) => {
+            const btn = e.target.closest(".grid-slot");
+            if (!btn) return;
+            this.loadGrid(Number(btn.dataset.id));
+        });
         this.updateSavedGridsPanel();
     }
 
     // Обновить HTML кнопок
     updateSavedGridsPanel() {
+        const panel = this.zone4.querySelector("#saved-grids-panel");
+        if (!panel) return;
 
-        const panel = document.querySelector(
-            "#saved-grids-panel"
-        );
+        const buttons = panel.querySelectorAll(".grid-slot");
 
-        if (!panel) {
+        // Если число сеток не изменилось — обновляем только активную.
+        if (buttons.length === this.state.savedGrids.length) {
+            buttons.forEach(btn => {
+                const id = Number(btn.dataset.id);
+                btn.style.background =
+                    id === this.state.activeGridId ? "#9147ff" : "#333";
+            });
             return;
         }
 
+        // Иначе пересобираем полностью.
+        this._rebuildSavedGridsPanel(panel);
+    }
+
+    _rebuildSavedGridsPanel(panel) {
         panel.innerHTML = "";
 
         const title = document.createElement("div");
-
-        title.textContent = "Сохран сетки";
-
+        title.textContent = "Сохранённые сетки";
         Object.assign(title.style, {
             fontWeight: "bold",
             marginBottom: "8px",
             fontSize: "14px"
         });
-
         panel.appendChild(title);
 
-
         if (this.state.savedGrids.length === 0) {
-
             const empty = document.createElement("div");
-
             empty.textContent = "Нет сохранённых сеток";
-
             empty.style.opacity = "0.6";
-
             panel.appendChild(empty);
-
             return;
         }
 
-
         this.state.savedGrids.forEach(grid => {
-
             const button = document.createElement("button");
-
             button.type = "button";
-
-            button.textContent =
-                this.getGridName(grid);
-
+            button.className = "grid-slot";
+            button.dataset.id = grid.id;
+            button.textContent = this.getGridName(grid);
+            button.title = "Выбрать сетку " + this.getGridName(grid);
 
             Object.assign(button.style, {
                 display: "block",
@@ -1523,10 +1480,7 @@ F2 - справка
                 padding: "8px",
                 marginBottom: "5px",
                 cursor: "pointer",
-                background:
-                    grid.id === this.state.activeGridId
-                        ? "#9147ff"
-                        : "#333",
+                background: grid.id === this.state.activeGridId ? "#9147ff" : "#333",
                 color: "white",
                 border: "1px solid #666",
                 borderRadius: "6px",
@@ -1534,21 +1488,7 @@ F2 - справка
                 fontWeight: "bold"
             });
 
-
-            button.title =
-                "Выбрать сетку " +
-                this.getGridName(grid);
-
-
-
-            button.addEventListener("click", () => {
-                this.loadGrid(grid);
-            });
-
-
-
             panel.appendChild(button);
-
         });
     }
 
@@ -1601,12 +1541,8 @@ F2 - справка
             e.preventDefault();
             e.stopPropagation();
 
-            clearTimeout(this.gridFadeTimer);
+            this._clearFadeTimers();
 
-            if (this.gridFadeFrame) {
-                cancelAnimationFrame(this.gridFadeFrame);
-                this.gridFadeFrame = null;
-            }
 
             this.destroy();
             alert("Скрипт удалён");
@@ -1643,12 +1579,9 @@ F2 - справка
     }
 
     startGridFadeTimer() {
-        clearTimeout(this.gridFadeTimer);
+        this._clearFadeTimers();
+        if (!this.state.visible) return;
 
-        if (this.gridFadeFrame) {
-            cancelAnimationFrame(this.gridFadeFrame);
-            this.gridFadeFrame = null;
-        }
 
         const getElements = () =>
             this.overlay.querySelectorAll(
@@ -1682,6 +1615,8 @@ F2 - справка
     destroy() {
         clearTimeout(this.gridFadeTimer);
         if (this.gridFadeFrame) cancelAnimationFrame(this.gridFadeFrame);
+
+        this.clearGrid();
 
         document.removeEventListener("mousemove", this.onMouseMove);
         document.removeEventListener("keydown", this.onKeyDown);
