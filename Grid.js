@@ -1,7 +1,7 @@
 ﻿class GridBuilder {
     constructor() {
         if (window.gridBuilder) {
-            alert("Скрипт уже запущен");
+            console.warn("GridBuilder уже запущен");
             return window.gridBuilder;
         }
 
@@ -52,36 +52,7 @@
 
         window.gridBuilder = this;
 
-        alert(`
-Readme
-1.Закрыть консоль разработчика.`
-        );
-        alert(`
-2.Shift + 1 показать/скрывает оверлей оверлей сетки/твич 
-Использовать лучше с 
-* режимом Theatre mode/Режим кинотеатра
-* Полноэкранный режим F11
-`);
-        alert(`
-Точками 1 и 2 построить диагональ для А1
-Точку 3 поставить в крайний правый низ сетки
-
-Построение сетки
-Навести курсор нажать
-цифрой 1 - поставить точку 1
-цифрой 2 - поставить точку 2
-цифрой 3 - поставить точку 3
-
-SHIFT + 1 - скрыть/показать сетку
-SHIFT + 3 - сделать невидимой
-
-DELETE - сбросить сетку
-SHIFT + DELETE - удалить скрипт
-
-Клик по ячейке подставит в блоке команд за место "-" координату
-
-F2 - справка
-`);
+        this.showInfo();
     }
 
     // Построение сетки
@@ -102,34 +73,15 @@ F2 - справка
         const { p1, cellW, cellH, cols, rows } = this.state;
 
         const layer = document.createElement("div");
-        layer.className = "grid-item grid-layer";
+        layer.className = "grid-item grid-layer gb-layer";
+        layer.style.left = p1.x + "px";
+        layer.style.top = p1.y + "px";
+        layer.style.width = (cols * cellW) + "px";
+        layer.style.height = (rows * cellH) + "px";
+        layer.style.backgroundSize = `${cellW}px ${cellH}px`;
 
-        Object.assign(layer.style, {
-            position: "fixed",
-            left: p1.x + "px",
-            top: p1.y + "px",
-            width: (cols * cellW) + "px",
-            height: (rows * cellH) + "px",
-            backgroundImage:
-                "linear-gradient(to right, rgba(0,120,255,.35) 1px, transparent 1px)," +
-                "linear-gradient(to bottom, rgba(0,120,255,.35) 1px, transparent 1px)",
-            backgroundSize: `${cellW}px ${cellH}px`,
-            pointerEvents: "auto",
-            zIndex: "999998",
-            boxShadow: "inset 0 0 0 1px rgba(0,120,255,.55)"
-        });
-
-        // --- Hover-подсветка ячейки под курсором ---
         const hover = document.createElement("div");
-        hover.className = "grid-hover";
-        Object.assign(hover.style, {
-            position: "absolute",
-            pointerEvents: "none",
-            background: "rgba(145,71,255,.25)",
-            border: "1px solid rgba(145,71,255,.7)",
-            boxSizing: "border-box",
-            display: "none"
-        });
+        hover.className = "grid-hover gb-hover";
         layer.appendChild(hover);
 
         // --- Обработчики сохраняем в this._layerHandlers ---
@@ -180,23 +132,10 @@ F2 - справка
 
         for (let x = 0; x < cols; x++) {
             const label = document.createElement("div");
-            label.className = "grid-item col-label";
-
-            Object.assign(label.style, {
-                position: "absolute",
-                left: (p1.x + x * cellW + cellW / 2) + "px",
-                top: (p1.y - 20) + "px",
-                transform: "translateX(-50%)",
-                fontWeight: "bold",
-                fontSize: "12px",
-                fontFamily: "monospace",
-                color: "#8ec8ff",
-                textShadow: "0 0 3px #000, 0 0 3px #000, 0 0 3px #000",
-                pointerEvents: "none",
-                userSelect: "none",
-                display: show ? "block" : "none"
-            });
-
+            label.className = "grid-item col-label gb-col-label";
+            label.style.left = (p1.x + x * cellW + cellW / 2) + "px";
+            label.style.top = (p1.y - 20) + "px";
+            label.style.display = show ? "block" : "none";
             label.textContent = this.cyr(x + 1);
             this.overlay.appendChild(label);
         }
@@ -208,25 +147,10 @@ F2 - справка
 
         for (let y = 0; y < rows; y++) {
             const label = document.createElement("div");
-            label.className = "grid-item row-label";
-
-            Object.assign(label.style, {
-                position: "absolute",
-                left: (p1.x - 8) + "px",
-                top: (p1.y + y * cellH + cellH / 2) + "px",
-                transform: "translate(-100%, -50%)",
-                fontWeight: "bold",
-                fontSize: "12px",
-                fontFamily: "monospace",
-                color: "#8effa1",
-                textShadow: "0 0 3px #000, 0 0 3px #000, 0 0 3px #000",
-                pointerEvents: "none",
-                userSelect: "none",
-                textAlign: "right",
-                whiteSpace: "nowrap",
-                display: show ? "block" : "none"
-            });
-
+            label.className = "grid-item row-label gb-row-label";
+            label.style.left = (p1.x - 8) + "px";
+            label.style.top = (p1.y + y * cellH + cellH / 2) + "px";
+            label.style.display = show ? "block" : "none";
             label.textContent = y + 1;
             this.overlay.appendChild(label);
         }
@@ -465,57 +389,36 @@ F2 - справка
 
     setGridInvisible(value) {
         this._clearFadeTimers();
-
         this.state.gridInvisible = value;
 
-        const elements = this.overlay.querySelectorAll(
-            ".grid-item, .point-marker, #grid-resize-menu"
-        );
-
-        elements.forEach(el => {
+        // Сетка и точки — только opacity, клики по ячейкам должны работать.
+        this.overlay.querySelectorAll(".grid-item, .point-marker").forEach(el => {
             el.style.transition = "none";
             el.style.opacity = value ? "0" : "1";
         });
+
+        // Меню — opacity + pointer-events (курсор не должен его видеть).
+        const menu = this.overlay.querySelector("#grid-resize-menu");
+        if (menu) {
+            menu.style.transition = "none";
+            menu.style.opacity = value ? "0" : "1";
+            menu.style.pointerEvents = value ? "none" : "auto";
+        }
     }
 
     // Создание слоя
     createOverlay() {
         this.overlay = document.createElement("div");
         this.overlay.id = "grid-builder-overlay";
-
-        Object.assign(this.overlay.style, {
-            position: "fixed",
-            left: "0",
-            top: "0",
-            width: "100vw",
-            height: "100vh",
-
-            display: "grid",
-            gridTemplateColumns: "5fr 40fr 8fr 2fr",
-
-            zIndex: "999999",
-            pointerEvents: "none"
-        });
+        this.overlay.className = "gb-overlay";
 
         this.zone1 = document.createElement("div");
         this.zone2 = document.createElement("div");
-        this.zone3 = document.createElement("div"); // Панель управления 
-        this.zone4 = document.createElement("div"); // Сохранённые сетки
+        this.zone3 = document.createElement("div");
+        this.zone4 = document.createElement("div");
 
-        [
-            this.zone1,
-            this.zone2,
-            this.zone3,
-            this.zone4
-        ].forEach((zone, index) => {
-            Object.assign(zone.style, {
-                position: "relative",
-                width: "100%",
-                height: "100%",
-                minWidth: "0",
-                pointerEvents: "none"
-            });
-
+        [this.zone1, this.zone2, this.zone3, this.zone4].forEach((zone, index) => {
+            zone.className = "gb-zone";
             zone.dataset.zone = index + 1;
             this.overlay.appendChild(zone);
         });
@@ -525,71 +428,231 @@ F2 - справка
     // Информационная панель
     createInfo() {
         this.info = document.createElement("div");
-
-        Object.assign(this.info.style, {
-            position: "fixed",
-            left: "10px",
-            top: "10px",
-            background: "rgba(0,0,0,.8)",
-            color: "white",
-            padding: "8px",
-            fontFamily: "monospace",
-            fontSize: "14px",
-            borderRadius: "5px",
-            pointerEvents: "none"
-        });
-
+        this.info.className = "gb-info";
         this.info.textContent = "Наведите курсор в угол А1 и нажмите цифру 1";
         this.zone1.appendChild(this.info);
     }
 
+    _injectStyles() {
+        if (document.getElementById("gb-styles")) return;
+        const style = document.createElement("style");
+        style.id = "gb-styles";
+        style.textContent = `
+    /* ===== Help panel ===== */
+    .gb-help { height:100%; overflow-y:auto; padding:16px; box-sizing:border-box;
+        background:rgba(0,0,0,.55); color:#efeff1; font-family:monospace;
+        font-size:13px; line-height:1.55; pointer-events:auto; scrollbar-width:none; }
+    .gb-help h2 { margin:0 0 4px; font-size:18px; color:#9147ff; }
+    .gb-help h3 { margin:0 0 6px; font-size:14px; color:#8ec8ff; }
+    .gb-help hr { border:none; border-top:1px solid #444; margin:12px 0; }
+    .gb-help p, .gb-help ol, .gb-help ul { margin:0 0 10px; }
+    .gb-help ol, .gb-help ul { padding-left:20px; }
+    .gb-help table { width:100%; border-collapse:collapse; font-size:12px; }
+    .gb-help table td { padding:2px 0; }
+    .gb-help table td:first-child { color:#8ec8ff; }
+    .gb-help .dim { opacity:.7; }
+    .gb-help .small { font-size:12px; }
+
+    .gb-grid { display:grid; grid-template-columns:32px repeat(4,1fr);
+        grid-template-rows:24px repeat(4,1fr); gap:0; font-family:monospace;
+        font-size:12px; max-width:340px; margin-bottom:12px; }
+    .gb-grid .col { text-align:center; color:#8ec8ff; font-weight:bold; }
+    .gb-grid .row { text-align:right; padding-right:4px; color:#8effa1; font-weight:bold; }
+    .gb-grid .cell { border:1px solid rgba(0,120,255,.5); padding:6px 4px;
+        text-align:center; color:#efeff1; position:relative; }
+    .gb-point { position:absolute; width:16px; height:16px; background:red;
+        color:#fff; font-size:10px; font-weight:bold; line-height:16px;
+        text-align:center; border-radius:50%; border:1px solid #fff; }
+    .gb-point.tl { left:-7px; top:-7px; }
+    .gb-point.br { right:-7px; bottom:-7px; }
+
+    /* ===== Overlay & zones ===== */
+    .gb-overlay { position:fixed; left:0; top:0; width:100vw; height:100vh;
+        display:grid; grid-template-columns:5fr 40fr 8fr 2fr;
+        z-index:999999; pointer-events:none; }
+    .gb-zone { position:relative; width:100%; height:100%;
+        min-width:0; pointer-events:none; }
+
+    /* ===== Info ===== */
+    .gb-info { position:fixed; left:10px; top:10px; background:rgba(0,0,0,.8);
+        color:white; padding:8px; font-family:monospace; font-size:14px;
+        border-radius:5px; pointer-events:none; }
+
+    /* ===== Commands panel ===== */
+    .gb-cmd-panel { position:absolute; left:0; top:95px; bottom:0; width:100%;
+        height:calc(100vh - 95px); padding:0; background:rgba(0,0,0,.15);
+        color:white; font-family:monospace; font-size:13px; border-radius:5px;
+        pointer-events:auto; box-sizing:border-box; overflow-y:auto;
+        scrollbar-width:none; }
+    .gb-cmd-save { display:block; width:100%; box-sizing:border-box; padding:10px;
+        margin-bottom:10px; cursor:pointer;
+        background:linear-gradient(135deg,#9147ff,#5c2d99); color:white;
+        border:none; border-radius:8px; font-family:monospace;
+        font-size:14px; font-weight:bold; }
+    .gb-cmd-textarea { display:block; width:100%; height:calc(100vh - 180px);
+        box-sizing:border-box; resize:none; padding:3px; background:rgba(0,0,0,.3);
+        color:#efeff1; border:1px solid #3a3a3d; border-radius:8px; outline:none;
+        font-family:monospace; font-size:14px; line-height:1.5; }
+    .gb-cmd-edit { display:block; width:100%; box-sizing:border-box; padding:10px;
+        margin-bottom:10px; cursor:pointer;
+        background:linear-gradient(135deg,#9147ff,#5c2d99); color:#fff;
+        border:1px solid rgba(255,255,255,.25); border-radius:10px;
+        font-family:monospace; font-size:14px; font-weight:bold;
+        box-shadow:0 4px 10px rgba(0,0,0,.3); }
+    .gb-cmd-list { overflow-y:auto; height:calc(100vh - 170px);
+        padding-right:4px; scrollbar-width:none; }
+    .gb-cmd-btn { display:block; width:100%; box-sizing:border-box; padding:5px 8px;
+        margin-bottom:8px; text-align:left; cursor:pointer; white-space:normal;
+        overflow-wrap:anywhere; background:linear-gradient(135deg,#333,#222);
+        color:#fff; border:1px solid rgba(255,255,255,.15); border-radius:10px;
+        font-family:monospace; font-size:14px; font-weight:600;
+        box-shadow:0 4px 10px rgba(0,0,0,.25); transition:all .15s ease;
+        user-select:none; opacity:.7; }
+
+    /* ===== Grid layer ===== */
+    .gb-layer { position:fixed;
+        background-image:
+            linear-gradient(to right, rgba(0,120,255,.35) 1px, transparent 1px),
+            linear-gradient(to bottom, rgba(0,120,255,.35) 1px, transparent 1px);
+        pointer-events:auto; z-index:999998;
+        box-shadow:inset 0 0 0 1px rgba(0,120,255,.55); }
+    .gb-hover { position:absolute; pointer-events:none;
+        background:rgba(145,71,255,.25); border:1px solid rgba(145,71,255,.7);
+        box-sizing:border-box; display:none; }
+    .gb-col-label { position:absolute; transform:translateX(-50%);
+        font-weight:bold; font-size:12px; font-family:monospace; color:#8ec8ff;
+        text-shadow:0 0 3px #000,0 0 3px #000,0 0 3px #000;
+        pointer-events:none; user-select:none; }
+    .gb-row-label { position:absolute; transform:translate(-100%,-50%);
+        font-weight:bold; font-size:12px; font-family:monospace; color:#8effa1;
+        text-shadow:0 0 3px #000,0 0 3px #000,0 0 3px #000;
+        pointer-events:none; user-select:none; text-align:right; white-space:nowrap; }
+
+    /* ===== Point marker ===== */
+    .gb-point-marker { position:fixed; width:12px; height:12px; background:red;
+        border-radius:50%; transform:translate(-50%,-50%); pointer-events:none;
+        z-index:1000001; display:block; }
+    .gb-point-marker > span { position:absolute; left:15px; top:-10px;
+        color:red; font-weight:bold; }
+
+    /* ===== Resize menu ===== */
+    .gb-resize-menu { position:absolute; left:0; top:10px; width:100%;
+        max-height:90vh; overflow-y:auto; padding:8px; background:rgba(0,0,0,.9);
+        color:white; font-family:monospace; font-size:12px; border-radius:8px;
+        pointer-events:auto; box-sizing:border-box; z-index:1000000; }
+    .gb-move-controls { display:grid; grid-template-columns:repeat(3,1fr); gap:5px; }
+    .gb-move-btn { min-height:30px; cursor:pointer; border:1px solid #666;
+        border-radius:4px; background:#333; color:white; font-size:16px; }
+    .gb-move-btn:disabled { cursor:default; background:transparent; }
+
+    /* ===== Saved grids panel ===== */
+    .gb-saved-panel { position:absolute; left:0; top:10px; width:100%;
+        max-height:70vh; overflow-y:auto; padding:6px; background:rgba(0,0,0,.9);
+        color:white; border-radius:8px; z-index:1000000; font-family:monospace;
+        font-size:12px; box-sizing:border-box; pointer-events:auto; }
+    .gb-saved-title { font-weight:bold; margin-bottom:8px; font-size:14px; }
+    .gb-saved-empty { opacity:.6; }
+    .gb-grid-slot { display:block; width:100%; padding:8px; margin-bottom:5px;
+        cursor:pointer; background:#333; color:white; border:1px solid #666;
+        border-radius:6px; font-family:monospace; font-weight:bold; }
+    .gb-grid-slot.active { background:#9147ff; }
+    `;
+        document.head.appendChild(style);
+    }
+
+    showInfo() {
+        // Если уже показано — скрыть.
+        if (this.zone2.dataset.shown === "1") {
+            this.zone2.innerHTML = "";
+            this.zone2.dataset.shown = "0";
+            return;
+        }
+
+        this._injectStyles();
+        this.zone2.dataset.shown = "1";
+
+        const col = (c) => `<div class="col">${c}</div>`;
+        const row = (n) => `<div class="row">${n}</div>`;
+        const cell = (id, points = "") =>
+            `<div class="cell">${id}${points}</div>`;
+
+        const pt1 = `<span class="gb-point tl">1</span>`;
+        const pt2 = `<span class="gb-point br">2</span>`;
+        const pt3 = `<span class="gb-point br">3</span>`;
+
+        const gridHTML = `
+    ${row(1)}${cell("А1", pt1 + pt2)}${cell("Б1")}${cell("В1")}${cell("Г1")}
+    ${row(2)}${cell("А2")}${cell("Б2")}${cell("В2")}${cell("Г2")}
+    ${row(3)}${cell("А3")}${cell("Б3")}${cell("В3")}${cell("Г3")}
+    ${row(4)}${cell("А4")}${cell("Б4")}${cell("В4")}${cell("Г4", pt3)}
+`;
+
+        this.zone2.innerHTML = `
+        <div class="gb-help">
+            <h2>chatdefgrid</h2>
+            <div class="dim">Сетка координат для браузера · F12</div>
+            <hr>
+
+            <h3>Построение</h3>
+            <ol>
+                <li>Наведи на левый верхний угол А1 → <b>1</b></li>
+                <li>Наведи на правый нижний угол А1 → <b>2</b></li>
+                <li>Наведи на правый нижний угол таблицы → <b>3</b></li>
+            </ol>
+            <hr>
+
+            <h3>Панель точек</h3>
+            <p>Шаг 1 / 0.5 / 0.1 / 0.01 px. Точка 3 меняет размер таблицы, не ячейки.</p>
+            <hr>
+
+            <h3>Команды</h3>
+            <ul>
+                <li><b>{coord}</b> — подставляется выбранная координата</li>
+                <li><b>;</b> — конец команды (удаляется при отправке)</li>
+            </ul>
+            <hr>
+
+            <h3>Горячие клавиши</h3>
+            <table>
+                <tr><td>1 / 2 / 3</td><td>точки 1, 2, 3</td></tr>
+                <tr><td>Shift+1</td><td>скрыть/показать сетку</td></tr>
+                <tr><td>Shift+3</td><td>прозрачность</td></tr>
+                <tr><td>Shift+S</td><td>сохранить сетку</td></tr>
+                <tr><td>Delete</td><td>сброс сетки</td></tr>
+                <tr><td>Shift+Delete</td><td>удалить скрипт</td></tr>
+                <tr><td>F2</td><td>справка (toggle)</td></tr>
+            </table>
+            <hr>
+
+            <h3>Лимиты</h3>
+            <p>Максимум 200×200 ячеек, минимум 1px.</p>
+            <hr>
+
+            <h3>Пример: сетка 4×4</h3>
+            <div class="gb-grid">
+                <div></div>
+                ${col("А")}${col("Б")}${col("В")}${col("Г")}
+                ${gridHTML}
+            </div>
+
+            <p class="small">
+                <span style="color:red;font-weight:bold">1</span> — левый верхний угол А1 ·
+                <span style="color:red;font-weight:bold">2</span> — правый нижний угол А1 ·
+                <span style="color:red;font-weight:bold">3</span> — правый нижний угол таблицы
+            </p>
+            <p class="small dim" style="margin:0">
+                Клик по ячейке подставит координату в команды вместо <b>{coord}</b>.
+            </p>
+        </div>
+    `;
+    }
+
     createCommandsPanel() {
         this.commandsPanel = document.createElement("div");
-
-        //Object.assign(this.commandsPanel.style, {
-        //    position: "absolute",
-        //    left: "0",
-        //    top: "95px",
-        //    width: "100%",
-        //    padding: "10px",
-        //    background: "rgba(0,0,0,.85)",
-        //    color: "white",
-        //    fontFamily: "monospace",
-        //    fontSize: "13px",
-        //    borderRadius: "5px",
-        //    pointerEvents: "auto",
-        //    boxSizing: "border-box"
-        //});
-        Object.assign(this.commandsPanel.style, {
-            position: "absolute",
-
-            left: "0",
-            top: "95px",
-            bottom: "0",
-
-            width: "100%",
-            height: "calc(100vh - 95px)",
-
-            padding: "0px",
-
-            background: "rgba(0,0,0,.15)",
-            color: "white",
-
-            fontFamily: "monospace",
-            fontSize: "13px",
-
-            borderRadius: "5px",
-
-            pointerEvents: "auto",
-            boxSizing: "border-box",
-
-            overflowY: "auto",
-
-            scrollbarWidth: "none",
-            msOverflowStyle: "none"
-        });
-
+        this.commandsPanel.className = "gb-cmd-panel";
         this.zone1.appendChild(this.commandsPanel);
+        // ... обработчик клика и showCommandsEditor() БЕЗ изменений
+
         this.commandsPanel.addEventListener("click", (e) => {
             const btn = e.target.closest(".cmd-btn");
             if (btn) {
@@ -610,76 +673,16 @@ F2 - справка
 
 
         const saveButton = document.createElement("button");
-
         saveButton.textContent = "💾 Сохранить";
-
         saveButton.type = "button";
-
-
-        Object.assign(saveButton.style, {
-            display: "block",
-            width: "100%",
-
-            boxSizing: "border-box",
-
-            padding: "10px",
-            marginBottom: "10px",
-
-            cursor: "pointer",
-
-            background: "linear-gradient(135deg, #9147ff, #5c2d99)",
-
-            color: "white",
-
-            border: "none",
-            borderRadius: "8px",
-
-            fontFamily: "monospace",
-            fontSize: "14px",
-            fontWeight: "bold"
-        });
+        saveButton.className = "gb-cmd-save";
 
 
 
         const textarea = document.createElement("textarea");
-
-        textarea.placeholder =
-            " - заменяется на координату;\n!башня -;\n!холод -;\n!улучшить;";
-
-
+        textarea.placeholder = "{coord} заменяется на координату;\n!б {coord};";
         textarea.value = this.state.commands.join("\n");
-
-
-
-        Object.assign(textarea.style, {
-
-            display: "block",
-
-            width: "100%",
-            height: "calc(100vh - 180px)",
-
-            boxSizing: "border-box",
-
-            resize: "none",
-
-            padding: "3px",
-
-            background: "rgba(0, 0, 0, 0.3)",
-
-            color: "#efeff1",
-
-            border: "1px solid #3a3a3d",
-
-            borderRadius: "8px",
-
-            outline: "none",
-
-            fontFamily: "monospace",
-
-            fontSize: "14px",
-
-            lineHeight: "1.5"
-        });
+        textarea.className = "gb-cmd-textarea";
 
 
 
@@ -710,67 +713,19 @@ F2 - справка
 
         const editButton = document.createElement("button");
         editButton.type = "button";
-        editButton.className = "cmd-edit";
+        editButton.className = "cmd-edit gb-cmd-edit";
         editButton.textContent = "⚙ Изменить команды";
-
-        Object.assign(editButton.style, {
-            display: "block",
-            width: "100%",
-            boxSizing: "border-box",
-            padding: "10px",
-            marginBottom: "10px",
-            cursor: "pointer",
-            background: "linear-gradient(135deg, #9147ff, #5c2d99)",
-            color: "#fff",
-            border: "1px solid rgba(255,255,255,.25)",
-            borderRadius: "10px",
-            fontFamily: "monospace",
-            fontSize: "14px",
-            fontWeight: "bold",
-            boxShadow: "0 4px 10px rgba(0,0,0,.3)"
-        });
-
         this.commandsPanel.appendChild(editButton);
 
         const list = document.createElement("div");
-        Object.assign(list.style, {
-            overflowY: "auto",
-            height: "calc(100vh - 170px)",
-            paddingRight: "4px",
-            scrollbarWidth: "none",
-            msOverflowStyle: "none"
-        });
+        list.className = "gb-cmd-list";
 
         this.state.commands.forEach((command, i) => {
             const button = document.createElement("button");
             button.type = "button";
-            button.className = "cmd-btn";
+            button.className = "cmd-btn gb-cmd-btn";
             button.dataset.index = i;
             button.textContent = this._renderCommand(command);
-
-            Object.assign(button.style, {
-                display: "block",
-                width: "100%",
-                boxSizing: "border-box",
-                padding: "5px 8px",
-                marginBottom: "8px",
-                textAlign: "left",
-                cursor: "pointer",
-                whiteSpace: "normal",
-                overflowWrap: "anywhere",
-                background: "linear-gradient(135deg, #333, #222)",
-                color: "#fff",
-                border: "1px solid rgba(255,255,255,.15)",
-                borderRadius: "10px",
-                fontFamily: "monospace",
-                fontSize: "14px",
-                fontWeight: "600",
-                boxShadow: "0 4px 10px rgba(0,0,0,.25)",
-                transition: "all .15s ease",
-                userSelect: "none",
-                opacity: "0.7"
-            });
-
             list.appendChild(button);
         });
 
@@ -858,7 +813,7 @@ F2 - справка
         this.addPoint(this.state["p" + number], number);
 
         if (number === 1) {
-            this.info.textContent = "Точка 1 выбрана. Переместите курсор по диагонали вниз в угол А1 нажми цифру 2";
+            this.info.textContent = "Точка 1 выбрана. Переместите курсор по диагонали вниз в угол нажми цифру 2";
         }
 
         if (number === 2) {
@@ -870,7 +825,7 @@ F2 - справка
             this.saveCurrentGrid();
             this._finishGridSetup();
             this.info.innerHTML = `
-        Сетка готова. Shift + s сохранить сетку. Shift + 3 прозрачная сетка
+        Сетка готова.
 
         <hr>
 
@@ -882,46 +837,12 @@ F2 - справка
 
     // Создание или обновление маркера
     addPoint(p, number) {
-        let el = this.overlay.querySelector(
-            ".point-marker-" + number
-        );
+        let el = this.overlay.querySelector(".point-marker-" + number);
 
         if (!el) {
             el = document.createElement("div");
-            el.className = `point-marker point-marker-${number}`;
-
-            //Object.assign(el.style, {
-            //    position: "absolute",
-            //    width: "12px",
-            //    height: "12px",
-            //    background: "red",
-            //    borderRadius: "50%",
-            //    transform: "translate(-50%,-50%)",
-            //    pointerEvents: "none"
-            //});
-
-            Object.assign(el.style, {
-                position: "fixed",
-                width: "12px",
-                height: "12px",
-                background: "red",
-                borderRadius: "50%",
-                transform: "translate(-50%, -50%)",
-                pointerEvents: "none",
-                zIndex: "1000001",
-                display: "block"
-            });
-
-            el.innerHTML = `
-                <span style="
-                    position:absolute;
-                    left:15px;
-                    top:-10px;
-                    color:red;
-                    font-weight:bold;
-                ">${number}</span>
-            `;
-
+            el.className = `point-marker point-marker-${number} gb-point-marker`;
+            el.innerHTML = `<span>${number}</span>`;
             this.overlay.appendChild(el);
         }
 
@@ -984,24 +905,7 @@ F2 - справка
         if (!menu) {
             menu = document.createElement("div");
             menu.id = "grid-resize-menu";
-
-            Object.assign(menu.style, {
-                position: "absolute",
-                left: "0",
-                top: "10px",
-                width: "100%",
-                maxHeight: "90vh",
-                overflowY: "auto",
-                padding: "8px",
-                background: "rgba(0,0,0,.9)",
-                color: "white",
-                fontFamily: "monospace",
-                fontSize: "12px",
-                borderRadius: "8px",
-                pointerEvents: "auto",
-                boxSizing: "border-box",
-                zIndex: "1000000"
-            });
+            menu.className = "gb-resize-menu";
 
             menu.innerHTML = `
             <div style="font-weight:bold;font-size:15px;margin-bottom:12px">
@@ -1057,24 +961,13 @@ F2 - справка
 
 
     createMoveControls(controls) {
-        Object.assign(controls.style, {
-            display: "grid",
-            gridTemplateColumns: "repeat(3, 1fr)",
-            gap: "5px"
-        });
+        controls.className = "gb-move-controls";
 
         const pointNumber = Number(controls.dataset.point);
-
         const buttons = [
-            ["", 0, 0],
-            ["▲", 0, -1],
-            ["", 0, 0],
-            ["◀", -1, 0],
-            ["•", 0, 0],
-            ["▶", 1, 0],
-            ["", 0, 0],
-            ["▼", 0, 1],
-            ["", 0, 0]
+            ["", 0, 0], ["▲", 0, -1], ["", 0, 0],
+            ["◀", -1, 0], ["•", 0, 0], ["▶", 1, 0],
+            ["", 0, 0], ["▼", 0, 1], ["", 0, 0]
         ];
 
         buttons.forEach(([label, dx, dy]) => {
@@ -1083,23 +976,13 @@ F2 - справка
             button.textContent = label || " ";
             button.disabled = !label;
             button.title = label ? `Переместить точку ${pointNumber}` : "";
+            button.className = "gb-move-btn" + (label ? " move-btn" : "");
 
             if (label) {
-                button.className = "move-btn";
                 button.dataset.point = pointNumber;
                 button.dataset.dx = dx;
                 button.dataset.dy = dy;
             }
-
-            Object.assign(button.style, {
-                minHeight: "30px",
-                cursor: label ? "pointer" : "default",
-                border: "1px solid #666",
-                borderRadius: "4px",
-                background: label ? "#333" : "transparent",
-                color: "white",
-                fontSize: "16px"
-            });
 
             controls.appendChild(button);
         });
@@ -1174,27 +1057,7 @@ F2 - справка
 
     // Справка
     showHelp() {
-        alert(`
-Readme
-Точками 1 и 2 построить диагональ для А1
-Точку 3 поставить в крайний правый низ сетки
-
-Построение сетки
-Навести курсор нажать
-цифрой 1 - поставить точку 1
-цифрой 2 - поставить точку 2
-цифрой 3 - поставить точку 3
-
-SHIFT + 1 - скрыть/показать сетку
-SHIFT + 3 - сделать невидимой
-
-DELETE - сбросить сетку
-SHIFT + DELETE - удалить скрипт
-
-Клик по ячейке подставит в блоке команд за место "-" координату
-
-F2 - справка
-`);
+        this.showInfo();
     }
     // ===============================
     // СОХРАНЕНИЕ СЕТОК
@@ -1241,7 +1104,7 @@ F2 - справка
         const { p1, p2, p3, cols, rows } = this.state;
 
         if (!p1 || !p2 || !p3 || cols <= 0 || rows <= 0) {
-            alert("Сначала полностью постройте сетку");
+            this.info.textContent = "Сначала полностью постройте сетку";
             return;
         }
 
@@ -1304,33 +1167,21 @@ F2 - справка
 
     // Автоматическое обновление активной сетки
     updateActiveGrid() {
-
-        if (this.state.activeGridId === null) {
-            return;
-        }
+        if (this.state.activeGridId === null) return;
 
         const grid = this.state.savedGrids.find(
             g => g.id === this.state.activeGridId
         );
+        if (!grid) return;
 
-        if (!grid) {
-            return;
-        }
+        grid.p1 = { x: this.state.p1.x, y: this.state.p1.y };
+        grid.p2 = { x: this.state.p2.x, y: this.state.p2.y };
+        grid.p3 = { x: this.state.p3.x, y: this.state.p3.y };
 
-        grid.p1 = {
-            x: this.state.p1.x,
-            y: this.state.p1.y
-        };
-
-        grid.p2 = {
-            x: this.state.p2.x,
-            y: this.state.p2.y
-        };
-
-        grid.p3 = {
-            x: this.state.p3.x,
-            y: this.state.p3.y
-        };
+        grid.cellW = this.state.cellW;
+        grid.cellH = this.state.cellH;
+        grid.cols = this.state.cols;
+        grid.rows = this.state.rows;
 
         this.updateSavedGridsPanel();
     }
@@ -1370,9 +1221,9 @@ F2 - справка
             return;
         }
 
-            //this.addPoint(this.state.p1, 1);
-            //this.addPoint(this.state.p2, 2);
-            //this.addPoint(this.state.p3, 3);
+        //this.addPoint(this.state.p1, 1);
+        //this.addPoint(this.state.p2, 2);
+        //this.addPoint(this.state.p3, 3);
 
         // Показываем сетку и запускаем новый таймер.
         //this.setGridInvisible(false);
@@ -1397,25 +1248,7 @@ F2 - справка
 
         panel.id = "saved-grids-panel";
 
-        Object.assign(panel.style, {
-            position: "absolute",
-            left: "0",
-            top: "10px",
-            width: "100%",
-            maxHeight: "70vh",
-            overflowY: "auto",
-            padding: "6px",
-            background: "rgba(0,0,0,.9)",
-            color: "white",
-            borderRadius: "8px",
-            zIndex: "1000000",
-            fontFamily: "monospace",
-            fontSize: "12px",
-            boxSizing: "border-box",
-            pointerEvents: "auto"
-        });
-
-        //document.body.appendChild(panel);
+        panel.className = "gb-saved-panel";
         this.zone4.appendChild(panel);
         panel.addEventListener("click", (e) => {
             const btn = e.target.closest(".grid-slot");
@@ -1432,12 +1265,17 @@ F2 - справка
 
         const buttons = panel.querySelectorAll(".grid-slot");
 
-        // Если число сеток не изменилось — обновляем только активную.
+        // Если число сеток совпадает — обновляем активный класс И текст.
         if (buttons.length === this.state.savedGrids.length) {
             buttons.forEach(btn => {
                 const id = Number(btn.dataset.id);
-                btn.style.background =
-                    id === this.state.activeGridId ? "#9147ff" : "#333";
+                const grid = this.state.savedGrids.find(g => g.id === id);
+                if (grid) {
+                    const name = this.getGridName(grid);
+                    btn.textContent = name;
+                    btn.title = "Выбрать сетку " + name;
+                }
+                btn.classList.toggle("active", id === this.state.activeGridId);
             });
             return;
         }
@@ -1450,18 +1288,14 @@ F2 - справка
         panel.innerHTML = "";
 
         const title = document.createElement("div");
+        title.className = "gb-saved-title";
         title.textContent = "Сохранённые сетки";
-        Object.assign(title.style, {
-            fontWeight: "bold",
-            marginBottom: "8px",
-            fontSize: "14px"
-        });
         panel.appendChild(title);
 
         if (this.state.savedGrids.length === 0) {
             const empty = document.createElement("div");
+            empty.className = "gb-saved-empty";
             empty.textContent = "Нет сохранённых сеток";
-            empty.style.opacity = "0.6";
             panel.appendChild(empty);
             return;
         }
@@ -1469,25 +1303,11 @@ F2 - справка
         this.state.savedGrids.forEach(grid => {
             const button = document.createElement("button");
             button.type = "button";
-            button.className = "grid-slot";
+            button.className = "grid-slot gb-grid-slot";
+            if (grid.id === this.state.activeGridId) button.classList.add("active");
             button.dataset.id = grid.id;
             button.textContent = this.getGridName(grid);
             button.title = "Выбрать сетку " + this.getGridName(grid);
-
-            Object.assign(button.style, {
-                display: "block",
-                width: "100%",
-                padding: "8px",
-                marginBottom: "5px",
-                cursor: "pointer",
-                background: grid.id === this.state.activeGridId ? "#9147ff" : "#333",
-                color: "white",
-                border: "1px solid #666",
-                borderRadius: "6px",
-                fontFamily: "monospace",
-                fontWeight: "bold"
-            });
-
             panel.appendChild(button);
         });
     }
@@ -1582,23 +1402,28 @@ F2 - справка
         this._clearFadeTimers();
         if (!this.state.visible) return;
 
+        this.state.gridInvisible = false;
+
+        const menu = this.overlay.querySelector("#grid-resize-menu");
+
+        // Возвращаем видимость и интерактивность перед новым циклом.
+        if (menu) {
+            menu.style.transition = "none";
+            menu.style.opacity = "1";
+            menu.style.pointerEvents = "auto";
+        }
 
         const getElements = () =>
             this.overlay.querySelectorAll(
                 ".grid-item, .point-marker, #grid-resize-menu"
             );
 
-        // Если прозрачность включена, сначала снимаем её.
-        this.state.gridInvisible = false;
-
         const elements = getElements();
-
         elements.forEach(el => {
             el.style.transition = "none";
             el.style.opacity = "1";
         });
 
-        // Даём браузеру применить полную видимость.
         this.gridFadeFrame = requestAnimationFrame(() => {
             this.gridFadeFrame = null;
 
@@ -1607,6 +1432,14 @@ F2 - справка
                     el.style.transition = "opacity 5s ease";
                     el.style.opacity = "0";
                 });
+
+                // После fade меню не должно ловить курсор.
+                if (menu) {
+                    menu.style.pointerEvents = "none";
+                }
+
+                // Синхронизируем состояние — fade завершился, сетка невидима.
+                this.state.gridInvisible = true;
             }, 10000);
         });
     }
@@ -1622,6 +1455,8 @@ F2 - справка
         document.removeEventListener("keydown", this.onKeyDown);
 
         this.restorePlayer();
+        const st = document.getElementById("gb-styles");
+        if (st) st.remove();
         this.overlay.remove();
 
         if (window.gridBuilder === this) {
