@@ -504,8 +504,61 @@
             this.overlay.appendChild(zone);
         });
 
+        // --- Делегат на все клики в zone2 ---
+        this.zone2.addEventListener("click", (e) => {
+            // Theatre Mode
+            const theatre = e.target.closest(".gb-theatre-btn");
+            if (theatre) {
+                const twitchBtn = document.querySelector(
+                    'button[aria-label*="кинотеатр" i], ' +
+                    'button[aria-label*="theatre" i]'
+                );
+                if (twitchBtn) {
+                    twitchBtn.click();
+                } else {
+                    this.info.textContent =
+                        "Кнопка Theatre Mode не найдена — нажмите alt + t вручную";
+                }
+                return;
+            }
+
+            // Reset размеров панелей
+            const reset = e.target.closest(".gb-layout-reset");
+            if (reset) {
+                this._resetLayoutVars();
+                return;
+            }
+        });
+
+        // --- Делегат на ввод в полях размеров ---
+        this.zone2.addEventListener("input", (e) => {
+            const input = e.target.closest(".gb-layout-input");
+            if (!input) return;
+
+            const varName = input.dataset.var;
+            let v = Number(input.value);
+            if (!v || v < 40) return;
+            v = Math.min(v, 400);
+
+            this.overlay.style.setProperty(varName, v + "px");
+            this._saveLayoutVars();
+        });
+
         document.body.appendChild(this.overlay);
+        this._applyLayoutVars();
     }
+
+    _applyLayoutVars() {
+        const saved = JSON.parse(localStorage.getItem("gb-layout") || "{}");
+        const c1 = saved.col1 ?? 165;
+        const c3 = saved.col3 ?? 180;
+        const c4 = saved.col4 ?? 80;
+
+        this.overlay.style.setProperty("--gb-col1", c1 + "px");
+        this.overlay.style.setProperty("--gb-col3", c3 + "px");
+        this.overlay.style.setProperty("--gb-col4", c4 + "px");
+    }
+
     // Информационная панель
     createInfo() {
         this.info = document.createElement("div");
@@ -520,7 +573,8 @@
         style.id = "gb-styles";
         style.textContent = `
     /* ===== Help panel ===== */
-    .gb-help { height:100%; overflow-y:auto; padding:16px; box-sizing:border-box;
+    .gb-help { position:absolute; inset:0; z-index:1000003;
+        overflow-y:auto; padding:16px; box-sizing:border-box;
         background:rgba(0,0,0,.9); color:#efeff1; font-family:monospace;
         font-size:13px; line-height:1.55; pointer-events:auto; scrollbar-width:none; }
     .gb-help h2 { margin:0 0 4px; font-size:18px; color:#9147ff; }
@@ -537,6 +591,67 @@
         background: rgba(0,0,0,.35); border: 1px solid #444; border-radius: 5px;
         font-family: monospace; font-size: 12px; white-space: pre-wrap;
         overflow-wrap: anywhere; color: #fff; }
+    .gb-theatre-btn {
+        display:inline-block;
+        margin:0 0 12px;
+        padding:6px 12px;
+        cursor:pointer;
+        background:rgba(145,71,255,.15);
+        color:#8ec8ff;
+        border:1px solid rgba(145,71,255,.4);
+        border-radius:6px;
+        font-family:monospace;
+        font-size:12px;
+        font-weight:bold;
+        transition:background .15s, border-color .15s, color .15s;
+    }
+    .gb-theatre-btn:hover {
+        background:rgba(145,71,255,.3);
+        border-color:#9147ff;
+        color:#fff;
+    }
+    .gb-theatre-btn:active { transform:scale(.97); }
+
+
+    .gb-layout-grid {
+        display:grid;
+        grid-template-columns: 1fr 1fr 1fr auto;
+        gap:6px;
+        margin-bottom:12px;
+        align-items:end;
+    }
+    .gb-layout-grid label {
+        display:flex;
+        flex-direction:column;
+        gap:3px;
+        font-size:11px;
+        color:#8ec8ff;
+    }
+    .gb-layout-input {
+        width:100%;
+        padding:4px 6px;
+        background:rgba(0,0,0,.4);
+        border:1px solid #444;
+        border-radius:4px;
+        color:#fff;
+        font-family:monospace;
+        font-size:12px;
+        box-sizing:border-box;
+    }
+    .gb-layout-input:focus { outline:none; border-color:#9147ff; }
+    .gb-layout-reset {
+        padding:4px 10px;
+        height:26px;
+        cursor:pointer;
+        background:rgba(145,71,255,.2);
+        color:#8ec8ff;
+        border:1px solid rgba(145,71,255,.4);
+        border-radius:4px;
+        font-family:monospace;
+        font-size:11px;
+        font-weight:bold;
+    }
+    .gb-layout-reset:hover { background:rgba(145,71,255,.4); color:#fff; }
 
     .gb-grid { display:grid; grid-template-columns:32px repeat(4,1fr);
         grid-template-rows:24px repeat(4,1fr); gap:0; font-family:monospace;
@@ -554,9 +669,11 @@
     /* ===== Overlay & zones ===== */
     .gb-overlay { position:fixed; left:0; top:0; width:100vw; height:100vh;
         display:grid;
-        //grid-template-columns:5fr 40fr 8fr 2fr;
-        //grid-template-columns: minmax(60px, 165px) minmax(700px, 1fr) minmax(140px, 180px) minmax(70px, 80px);
-        grid-template-columns: clamp(60px, 12vw, 165px) 1fr clamp(140px, 12vw, 180px) clamp(60px, 5vw, 80px);
+        grid-template-columns:
+            var(--gb-col1, 165px)
+            1fr
+            var(--gb-col3, 180px)
+            var(--gb-col4, 80px);
         z-index:999999; pointer-events:none; }
     .gb-zone { position:relative; width:100%; height:100%;
         min-width:0; min-height:0; overflow:hidden; pointer-events:none; }
@@ -679,10 +796,24 @@
         font-size:12px; box-sizing:border-box; pointer-events:auto; }
     .gb-saved-title { font-weight:bold; margin-bottom:8px; font-size:14px; }
     .gb-saved-empty { opacity:.6; }
-    .gb-grid-slot { display:block; width:100%; padding:8px; margin-bottom:5px;
-        cursor:pointer; background:#333; color:white; border:1px solid #666;
-        border-radius:6px; font-family:monospace; font-weight:bold; font-size: 16px; }
-    .gb-grid-slot.active { background:#fff; border: 5px solid #b605ff; color: black;}
+    .gb-grid-slot {
+        display:block; width:100%; padding:8px; margin-bottom:5px;
+        cursor:pointer;
+        background:#333; color:#fff;
+        border:1px solid #555;
+        border-radius:6px;
+        font-family:monospace; font-weight:bold; font-size:16px;
+        box-sizing:border-box;
+        transition:background .15s, border-color .15s, color .15s, box-shadow .15s;
+    }
+    .gb-grid-slot:hover { background:#3d3d3d; border-color:#777; }
+    
+    .gb-grid-slot.active {
+        background:#fff; color:#000;
+        border-color:#b605ff;
+        box-shadow:0 0 0 2px rgba(182,5,255,.55), 0 0 12px rgba(182,5,255,.4);
+    }
+    .gb-grid-slot.active:hover { background:#fff; }
     `;
         document.head.appendChild(style);
     }
@@ -721,9 +852,27 @@
         <h2>chatdefgrid</h2>
         <div class="dim">Сетка координат для браузера · F12</div>
         <div class="dim">Скрыть вкладки браузера · F11</div>
-        <div class="dim">Перейти в · Theatre Mode</div>
+        <div class="dim">Скрыть оверлей · Shift + 1</div>
+        <button class="gb-theatre-btn" type="button" title="Переключить режим кинотеатра">
+        ▶ Перейти в Theatre Mode · alt + t
+        </button>
+
+        <h3>Размеры панелей (px)</h3>
+        <div class="gb-layout-grid">
+            <label>Команды
+                <input class="gb-layout-input" type="number" min="40" max="400" step="5" data-var="--gb-col1">
+            </label>
+            <label>Управление точками
+                <input class="gb-layout-input" type="number" min="60" max="400" step="5" data-var="--gb-col3">
+            </label>
+            <label>Сетки
+                <input class="gb-layout-input" type="number" min="40" max="400" step="5" data-var="--gb-col4">
+            </label>
+            <button class="gb-layout-reset" type="button">Сброс</button>
+        </div>
         <hr>
 
+        <hr>
         <h3>Построение</h3>
         <ol>
             <li>Наведи на левый верхний угол А1 → <b>1</b></li>
@@ -753,7 +902,7 @@
         <h3>Горячие клавиши</h3>
         <table>
             <tr><td>1 / 2 / 3</td><td>точки 1, 2, 3</td></tr>
-            <tr><td>Shift+1</td><td>скрыть/показать оверлей</td></tr>
+            <tr><td>Shift+1</td><td>скрыть/показать приложение</td></tr>
             <tr><td>Shift+3</td><td>прозрачность</td></tr>
             <tr><td>Shift+S</td><td>сохранить сетку</td></tr>
             <tr><td>Delete</td><td>сброс сетки</td></tr>
@@ -783,7 +932,50 @@
         </p>
     </div>
     `;
+
+        this._fillLayoutInputs();
     }
+
+    _fillLayoutInputs() {
+        const saved = JSON.parse(localStorage.getItem("gb-layout") || "{}");
+        const values = {
+            "--gb-col1": saved.col1 ?? 165,
+            "--gb-col3": saved.col3 ?? 180,
+            "--gb-col4": saved.col4 ?? 80
+        };
+
+        this.zone2.querySelectorAll(".gb-layout-input").forEach(input => {
+            input.value = values[input.dataset.var];
+        });
+    }
+
+    _saveLayoutVars() {
+        const gv = (name) => parseInt(
+            getComputedStyle(this.overlay).getPropertyValue(name), 10
+        ) || 0;
+
+        localStorage.setItem("gb-layout", JSON.stringify({
+            col1: gv("--gb-col1"),
+            col3: gv("--gb-col3"),
+            col4: gv("--gb-col4")
+        }));
+    }
+    _resetLayoutVars() {
+        this.overlay.style.setProperty("--gb-col1", "165px");
+        this.overlay.style.setProperty("--gb-col3", "180px");
+        this.overlay.style.setProperty("--gb-col4", "80px");
+        this._saveLayoutVars();
+
+        // Синхронизируем поля, если help открыт.
+        this.zone2.querySelectorAll(".gb-layout-input").forEach(input => {
+            const v = getComputedStyle(this.overlay)
+                .getPropertyValue(input.dataset.var)
+                .trim()
+                .replace("px", "");
+            input.value = v;
+        });
+    }
+
 
     createCommandsPanel() {
         this.commandsPanel = document.createElement("div");
@@ -1588,9 +1780,16 @@
         document.removeEventListener("keydown", this.onKeyDown);
 
         this.restorePlayer();
+
         const st = document.getElementById("gb-styles");
         if (st) st.remove();
+
         this.overlay.remove();
+
+        // Чистим сохранённые настройки.
+        Object.keys(localStorage)
+            .filter(k => k.startsWith("gb-"))
+            .forEach(k => localStorage.removeItem(k));
 
         if (window.gridBuilder === this) {
             delete window.gridBuilder;
