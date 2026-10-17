@@ -40,9 +40,9 @@
         this.createCommandsPanel();
         this.createSavedGridsPanel();
 
-        this.hidePanel();
+        //this.hidePanel();
 
-        //this.hidePlayer();
+        this.hidePlayer();
 
         this.onMouseMove = this.onMouseMove.bind(this);
         this.onKeyDown = this.onKeyDown.bind(this);
@@ -365,9 +365,6 @@
         return result;
     }
 
-    // тест
-    //twitchSend("!профиль");
-    // прозрачность 
     twitchSend(text) {
 
         const box = document.querySelector(
@@ -463,6 +460,7 @@
         }, 1000 + Math.random() * 1000);
 
     }
+    //twitchSend("!профиль");
 
     setGridInvisible(value) {
         this._clearFadeTimers();
@@ -523,7 +521,7 @@
         style.textContent = `
     /* ===== Help panel ===== */
     .gb-help { height:100%; overflow-y:auto; padding:16px; box-sizing:border-box;
-        background:rgba(0,0,0,.55); color:#efeff1; font-family:monospace;
+        background:rgba(0,0,0,.9); color:#efeff1; font-family:monospace;
         font-size:13px; line-height:1.55; pointer-events:auto; scrollbar-width:none; }
     .gb-help h2 { margin:0 0 4px; font-size:18px; color:#9147ff; }
     .gb-help h3 { margin:0 0 6px; font-size:14px; color:#8ec8ff; }
@@ -555,7 +553,10 @@
 
     /* ===== Overlay & zones ===== */
     .gb-overlay { position:fixed; left:0; top:0; width:100vw; height:100vh;
-        display:grid; grid-template-columns:5fr 40fr 8fr 2fr;
+        display:grid;
+        //grid-template-columns:5fr 40fr 8fr 2fr;
+        //grid-template-columns: minmax(60px, 165px) minmax(700px, 1fr) minmax(140px, 180px) minmax(70px, 80px);
+        grid-template-columns: clamp(60px, 12vw, 165px) 1fr clamp(140px, 12vw, 180px) clamp(60px, 5vw, 80px);
         z-index:999999; pointer-events:none; }
     .gb-zone { position:relative; width:100%; height:100%;
         min-width:0; min-height:0; overflow:hidden; pointer-events:none; }
@@ -680,8 +681,8 @@
     .gb-saved-empty { opacity:.6; }
     .gb-grid-slot { display:block; width:100%; padding:8px; margin-bottom:5px;
         cursor:pointer; background:#333; color:white; border:1px solid #666;
-        border-radius:6px; font-family:monospace; font-weight:bold; }
-    .gb-grid-slot.active { background:#9147ff; }
+        border-radius:6px; font-family:monospace; font-weight:bold; font-size: 16px; }
+    .gb-grid-slot.active { background:#fff; border: 5px solid #b605ff; color: black;}
     `;
         document.head.appendChild(style);
     }
@@ -719,6 +720,8 @@
     <div class="gb-help">
         <h2>chatdefgrid</h2>
         <div class="dim">Сетка координат для браузера · F12</div>
+        <div class="dim">Скрыть вкладки браузера · F11</div>
+        <div class="dim">Перейти в · Theatre Mode</div>
         <hr>
 
         <h3>Построение</h3>
@@ -750,7 +753,7 @@
         <h3>Горячие клавиши</h3>
         <table>
             <tr><td>1 / 2 / 3</td><td>точки 1, 2, 3</td></tr>
-            <tr><td>Shift+1</td><td>скрыть/показать сетку</td></tr>
+            <tr><td>Shift+1</td><td>скрыть/показать оверлей</td></tr>
             <tr><td>Shift+3</td><td>прозрачность</td></tr>
             <tr><td>Shift+S</td><td>сохранить сетку</td></tr>
             <tr><td>Delete</td><td>сброс сетки</td></tr>
