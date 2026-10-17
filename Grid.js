@@ -366,21 +366,15 @@
     }
 
     twitchSend(text) {
-
         const box = document.querySelector(
             '[data-a-target="chat-input"][contenteditable="true"]'
         );
-
         if (!box) {
             console.log("Поле не найдено");
             return;
         }
-
-
         // фокус
         box.focus();
-
-
         // курсор в конец
         const range = document.createRange();
         range.selectNodeContents(box);
@@ -390,11 +384,8 @@
         selection.removeAllRanges();
         selection.addRange(range);
 
-
-
         // очистка старого
         document.execCommand("selectAll", false, null);
-
 
         // вставка как пользователь
         document.execCommand(
@@ -402,7 +393,6 @@
             false,
             text
         );
-
 
         // события для React/Slate
         box.dispatchEvent(
@@ -414,7 +404,6 @@
             })
         );
 
-
         box.dispatchEvent(
             new InputEvent("input", {
                 bubbles: true,
@@ -422,7 +411,6 @@
                 data: text
             })
         );
-
 
         // небольшая задержка перед отправкой
         setTimeout(() => {
@@ -435,7 +423,6 @@
                 console.log("Кнопка не найдена");
                 return;
             }
-
 
             // настоящий клик мыши
             button.dispatchEvent(
@@ -455,7 +442,6 @@
             );
 
             button.click();
-
 
         }, 1000 + Math.random() * 1000);
 
