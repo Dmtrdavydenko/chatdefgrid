@@ -80,9 +80,23 @@
         layer.style.height = (rows * cellH) + "px";
         layer.style.backgroundSize = `${cellW}px ${cellH}px`;
 
+        // Hover живёт отдельно от слоя — чтобы fade слоя его не утаскивал.
         const hover = document.createElement("div");
-        hover.className = "grid-hover gb-hover";
-        layer.appendChild(hover);
+        hover.className = "gb-hover";
+        hover.style.display = "none";
+        hover.style.left = "0";
+        hover.style.top = "0";
+        this.overlay.appendChild(hover);
+        this.hover = hover;
+
+        // Индикаторы координаты у самой клетки.
+        this.cellColLabel = document.createElement("div");
+        this.cellColLabel.className = "gb-cell-col";
+        document.body.appendChild(this.cellColLabel);
+
+        this.cellRowLabel = document.createElement("div");
+        this.cellRowLabel.className = "gb-cell-row";
+        document.body.appendChild(this.cellRowLabel);
 
         // --- Обработчики сохраняем в this._layerHandlers ---
         const onMouseMove = (e) => {
@@ -92,18 +106,27 @@
 
             if (x < 0 || y < 0 || x >= cols || y >= rows) {
                 hover.style.display = "none";
+                this._hideHover();
                 return;
             }
 
             hover.style.display = "block";
-            hover.style.left = (x * cellW) + "px";
-            hover.style.top = (y * cellH) + "px";
+            hover.style.left = (rect.left + x * cellW) + "px";
+            hover.style.top = (rect.top + y * cellH) + "px";
             hover.style.width = cellW + "px";
             hover.style.height = cellH + "px";
+
+            this._updateHover(
+                x, y,
+                rect.left + x * cellW,
+                rect.top + y * cellH,
+                cellW, cellH
+            );
         };
 
         const onMouseLeave = () => {
             hover.style.display = "none";
+            this._hideHover();
         };
 
         const onClick = (e) => {
@@ -128,7 +151,8 @@
 
     buildColLabels() {
         const { p1, cellW, cols } = this.state;
-        const show = cellW >= 14;  // при узких ячейках буквы сливаются
+        const show = cellW >= 14;
+        this.colLabels = [];
 
         for (let x = 0; x < cols; x++) {
             const label = document.createElement("div");
@@ -138,12 +162,14 @@
             label.style.display = show ? "block" : "none";
             label.textContent = this.cyr(x + 1);
             this.overlay.appendChild(label);
+            this.colLabels.push(label);
         }
     }
 
     buildRowLabels() {
         const { p1, cellH, rows } = this.state;
         const show = cellH >= 14;
+        this.rowLabels = [];
 
         for (let y = 0; y < rows; y++) {
             const label = document.createElement("div");
@@ -153,6 +179,7 @@
             label.style.display = show ? "block" : "none";
             label.textContent = y + 1;
             this.overlay.appendChild(label);
+            this.rowLabels.push(label);
         }
     }
 
@@ -199,6 +226,39 @@
             const p = this.state["p" + n];
             if (p) this.addPoint(p, n);
         });
+    }
+
+    _updateHover(x, y, cellLeft, cellTop, cellW, cellH) {
+        // Подсветка на линейке.
+        if (this.colLabels) {
+            this.colLabels.forEach((el, i) => el.classList.toggle("active", i === x));
+        }
+        if (this.rowLabels) {
+            this.rowLabels.forEach((el, i) => el.classList.toggle("active", i === y));
+        }
+
+        // Буква — над клеткой, по центру.
+        if (this.cellColLabel) {
+            this.cellColLabel.textContent = this.cyr(x + 1);
+            this.cellColLabel.style.display = "block";
+            this.cellColLabel.style.left = (cellLeft + cellW / 2) + "px";
+            this.cellColLabel.style.top = (cellTop - 20) + "px";
+        }
+
+        // Цифра — слева от клетки, по центру.
+        if (this.cellRowLabel) {
+            this.cellRowLabel.textContent = String(y + 1);
+            this.cellRowLabel.style.display = "block";
+            this.cellRowLabel.style.left = (cellLeft - 6) + "px";
+            this.cellRowLabel.style.top = (cellTop + cellH / 2) + "px";
+        }
+    }
+
+    _hideHover() {
+        if (this.colLabels) this.colLabels.forEach(el => el.classList.remove("active"));
+        if (this.rowLabels) this.rowLabels.forEach(el => el.classList.remove("active"));
+        if (this.cellColLabel) this.cellColLabel.style.display = "none";
+        if (this.cellRowLabel) this.cellRowLabel.style.display = "none";
     }
 
     _computeGeometry() {
@@ -287,6 +347,23 @@
         this.updateSavedGridsPanel();
     }
 
+    _parseCommands(text) {
+        const result = [];
+        const re = /\(\(([^()]+)\)\(([^()]+)\)\)/g;
+        let m;
+
+        while ((m = re.exec(text)) !== null) {
+            result.push({ label: m[1].trim(), cmd: m[2].trim() });
+        }
+
+        // Если формат не распознан — считаем весь текст одной командой.
+        if (result.length === 0) {
+            const t = text.trim();
+            if (t) result.push({ label: t, cmd: t });
+        }
+
+        return result;
+    }
 
     // тест
     //twitchSend("!профиль");
@@ -391,18 +468,24 @@
         this._clearFadeTimers();
         this.state.gridInvisible = value;
 
-        // Сетка и точки — только opacity, клики по ячейкам должны работать.
+        // Сетка и подписи — fade.
         this.overlay.querySelectorAll(".grid-item, .point-marker").forEach(el => {
             el.style.transition = "none";
             el.style.opacity = value ? "0" : "1";
         });
 
-        // Меню — opacity + pointer-events (курсор не должен его видеть).
+        // Меню — opacity + pointer-events.
         const menu = this.overlay.querySelector("#grid-resize-menu");
         if (menu) {
             menu.style.transition = "none";
             menu.style.opacity = value ? "0" : "1";
             menu.style.pointerEvents = value ? "none" : "auto";
+        }
+
+        // Hover всегда opacity 1 — подсветка клетки под курсором.
+        if (this.hover) {
+            this.hover.style.transition = "none";
+            this.hover.style.opacity = "1";
         }
     }
 
@@ -452,6 +535,10 @@
     .gb-help table td:first-child { color:#8ec8ff; }
     .gb-help .dim { opacity:.7; }
     .gb-help .small { font-size:12px; }
+    .gb-help .gb-code { margin: 0 0 10px; padding: 6px 8px;
+        background: rgba(0,0,0,.35); border: 1px solid #444; border-radius: 5px;
+        font-family: monospace; font-size: 12px; white-space: pre-wrap;
+        overflow-wrap: anywhere; color: #fff; }
 
     .gb-grid { display:grid; grid-template-columns:32px repeat(4,1fr);
         grid-template-rows:24px repeat(4,1fr); gap:0; font-family:monospace;
@@ -471,7 +558,7 @@
         display:grid; grid-template-columns:5fr 40fr 8fr 2fr;
         z-index:999999; pointer-events:none; }
     .gb-zone { position:relative; width:100%; height:100%;
-        min-width:0; pointer-events:none; }
+        min-width:0; min-height:0; overflow:hidden; pointer-events:none; }
 
     /* ===== Info ===== */
     .gb-info { position:fixed; left:10px; top:10px; background:rgba(0,0,0,.8);
@@ -516,9 +603,9 @@
             linear-gradient(to bottom, rgba(0,120,255,.35) 1px, transparent 1px);
         pointer-events:auto; z-index:999998;
         box-shadow:inset 0 0 0 1px rgba(0,120,255,.55); }
-    .gb-hover { position:absolute; pointer-events:none;
+    .gb-hover { position:fixed; pointer-events:none;
         background:rgba(145,71,255,.25); border:1px solid rgba(145,71,255,.7);
-        box-sizing:border-box; display:none; }
+        box-sizing:border-box; display:none; z-index:999999; }
     .gb-col-label { position:absolute; transform:translateX(-50%);
         font-weight:bold; font-size:12px; font-family:monospace; color:#8ec8ff;
         text-shadow:0 0 3px #000,0 0 3px #000,0 0 3px #000;
@@ -527,6 +614,45 @@
         font-weight:bold; font-size:12px; font-family:monospace; color:#8effa1;
         text-shadow:0 0 3px #000,0 0 3px #000,0 0 3px #000;
         pointer-events:none; user-select:none; text-align:right; white-space:nowrap; }
+
+    .gb-col-label.active,
+    .gb-row-label.active {
+        color: #fff;
+        background: rgba(145,71,255,.9);
+        padding: 0 4px;
+        border-radius: 3px;
+        text-shadow: none;
+        opacity: 1 !important;
+        transition: none !important;
+    }
+    .gb-cell-col {
+        position: fixed;
+        pointer-events: none;
+        background: rgba(145,71,255,.95);
+        color: #fff;
+        padding: 1px 5px;
+        border-radius: 3px;
+        font-family: monospace;
+        font-size: 12px;
+        font-weight: bold;
+        z-index: 1000002;
+        display: none;
+        transform: translateX(-50%);
+    }
+    .gb-cell-row {
+        position: fixed;
+        pointer-events: none;
+        background: rgba(145,71,255,.95);
+        color: #fff;
+        padding: 1px 5px;
+        border-radius: 3px;
+        font-family: monospace;
+        font-size: 12px;
+        font-weight: bold;
+        z-index: 1000002;
+        display: none;
+        transform: translate(-100%, -50%);
+    }
 
     /* ===== Point marker ===== */
     .gb-point-marker { position:fixed; width:12px; height:12px; background:red;
@@ -565,11 +691,13 @@
         if (this.zone2.dataset.shown === "1") {
             this.zone2.innerHTML = "";
             this.zone2.dataset.shown = "0";
+            if (this.info) this.info.style.display = "";
             return;
         }
 
         this._injectStyles();
         this.zone2.dataset.shown = "1";
+        if (this.info) this.info.style.display = "none";
 
         const col = (c) => `<div class="col">${c}</div>`;
         const row = (n) => `<div class="row">${n}</div>`;
@@ -588,62 +716,69 @@
 `;
 
         this.zone2.innerHTML = `
-        <div class="gb-help">
-            <h2>chatdefgrid</h2>
-            <div class="dim">Сетка координат для браузера · F12</div>
-            <hr>
+    <div class="gb-help">
+        <h2>chatdefgrid</h2>
+        <div class="dim">Сетка координат для браузера · F12</div>
+        <hr>
 
-            <h3>Построение</h3>
-            <ol>
-                <li>Наведи на левый верхний угол А1 → <b>1</b></li>
-                <li>Наведи на правый нижний угол А1 → <b>2</b></li>
-                <li>Наведи на правый нижний угол таблицы → <b>3</b></li>
-            </ol>
-            <hr>
+        <h3>Построение</h3>
+        <ol>
+            <li>Наведи на левый верхний угол А1 → <b>1</b></li>
+            <li>Наведи на правый нижний угол А1 → <b>2</b></li>
+            <li>Наведи на правый нижний угол таблицы → <b>3</b></li>
+        </ol>
+        <hr>
 
-            <h3>Панель точек</h3>
-            <p>Шаг 1 / 0.5 / 0.1 / 0.01 px. Точка 3 меняет размер таблицы, не ячейки.</p>
-            <hr>
+        <h3>Панель точек</h3>
+        <p>Шаг 1 / 0.5 / 0.1 / 0.01 px. Точка 3 меняет размер таблицы, не ячейки.</p>
+        <hr>
 
-            <h3>Команды</h3>
-            <ul>
-                <li><b>{coord}</b> — подставляется выбранная координата</li>
-                <li><b>;</b> — конец команды (удаляется при отправке)</li>
-            </ul>
-            <hr>
+        <h3>Команды</h3>
+        <p>Формат: <b>((Название)(команда))</b></p>
+        <ul>
+            <li><b>{coord}</b> — подставляется выбранная координата</li>
+        </ul>
+        <p>Пример:</p>
+        <pre class="gb-code">((Башня)(!б {coord})) ((Холод)(!х {coord})) ((Улучшить)(!у))</pre>
+        <p>Кнопки получат имена <b>Башня</b>, <b>Холод</b>, <b>Улучшить</b>.</p>
+        <hr>
 
-            <h3>Горячие клавиши</h3>
-            <table>
-                <tr><td>1 / 2 / 3</td><td>точки 1, 2, 3</td></tr>
-                <tr><td>Shift+1</td><td>скрыть/показать сетку</td></tr>
-                <tr><td>Shift+3</td><td>прозрачность</td></tr>
-                <tr><td>Shift+S</td><td>сохранить сетку</td></tr>
-                <tr><td>Delete</td><td>сброс сетки</td></tr>
-                <tr><td>Shift+Delete</td><td>удалить скрипт</td></tr>
-                <tr><td>F2</td><td>справка (toggle)</td></tr>
-            </table>
-            <hr>
+        <h3>Сохранённые сетки</h3>
+        <p>Панель справа. <b>Shift+S</b> — добавить слот. Клик по слоту — загрузить.</p>
+        <hr>
 
-            <h3>Лимиты</h3>
-            <p>Максимум 200×200 ячеек, минимум 1px.</p>
-            <hr>
+        <h3>Горячие клавиши</h3>
+        <table>
+            <tr><td>1 / 2 / 3</td><td>точки 1, 2, 3</td></tr>
+            <tr><td>Shift+1</td><td>скрыть/показать сетку</td></tr>
+            <tr><td>Shift+3</td><td>прозрачность</td></tr>
+            <tr><td>Shift+S</td><td>сохранить сетку</td></tr>
+            <tr><td>Delete</td><td>сброс сетки</td></tr>
+            <tr><td>Shift+Delete</td><td>удалить скрипт</td></tr>
+            <tr><td>F2</td><td>справка (toggle)</td></tr>
+        </table>
+        <hr>
 
-            <h3>Пример: сетка 4×4</h3>
-            <div class="gb-grid">
-                <div></div>
-                ${col("А")}${col("Б")}${col("В")}${col("Г")}
-                ${gridHTML}
-            </div>
+        <h3>Лимиты</h3>
+        <p>Максимум 200×200 ячеек, минимум 1px.</p>
+        <hr>
 
-            <p class="small">
-                <span style="color:red;font-weight:bold">1</span> — левый верхний угол А1 ·
-                <span style="color:red;font-weight:bold">2</span> — правый нижний угол А1 ·
-                <span style="color:red;font-weight:bold">3</span> — правый нижний угол таблицы
-            </p>
-            <p class="small dim" style="margin:0">
-                Клик по ячейке подставит координату в команды вместо <b>{coord}</b>.
-            </p>
+        <h3>Пример: сетка 4×4</h3>
+        <div class="gb-grid">
+            <div></div>
+            ${col("А")}${col("Б")}${col("В")}${col("Г")}
+            ${gridHTML}
         </div>
+
+        <p class="small">
+            <span style="color:red;font-weight:bold">1</span> — левый верхний угол А1 ·
+            <span style="color:red;font-weight:bold">2</span> — правый нижний угол А1 ·
+            <span style="color:red;font-weight:bold">3</span> — правый нижний угол таблицы
+        </p>
+        <p class="small dim" style="margin:0">
+            Клик по ячейке подставит координату в команды вместо <b>{coord}</b>.
+        </p>
+    </div>
     `;
     }
 
@@ -658,7 +793,7 @@
             if (btn) {
                 const i = Number(btn.dataset.index);
                 const command = this.state.commands[i];
-                if (command) this.twitchSend(this._renderCommand(command));
+                if (command) this.twitchSend(this._renderCommand(command.cmd));
                 return;
             }
             const edit = e.target.closest(".cmd-edit");
@@ -671,7 +806,6 @@
         this.state.commandsSaved = false;
         this.commandsPanel.innerHTML = "";
 
-
         const saveButton = document.createElement("button");
         saveButton.textContent = "💾 Сохранить";
         saveButton.type = "button";
@@ -680,32 +814,20 @@
 
 
         const textarea = document.createElement("textarea");
-        textarea.placeholder = "{coord} заменяется на координату;\n!б {coord};";
-        textarea.value = this.state.commands.join("\n");
+        textarea.placeholder =
+            "{coord} заменяется на координату;\n((Башня)(!б {coord})) ((Холод)(!х {coord})) ((Улучшить)(!у))";
+        textarea.value = this.state.commands
+            .map(c => `((${c.label})(${c.cmd}))`)
+            .join(" ");
         textarea.className = "gb-cmd-textarea";
 
-
-
         saveButton.addEventListener("click", () => {
-
-            this.state.commands = textarea.value
-                .split("\n")
-                .map(line => line.trim())
-                .filter(Boolean);
-
-
+            this.state.commands = this._parseCommands(textarea.value);
             this.state.commandsSaved = true;
-
             this.showCommandsButtons();
-
         });
 
-
-
-        this.commandsPanel.append(
-            saveButton,
-            textarea
-        );
+        this.commandsPanel.append(saveButton, textarea);
     }
 
     showCommandsButtons() {
@@ -725,18 +847,18 @@
             button.type = "button";
             button.className = "cmd-btn gb-cmd-btn";
             button.dataset.index = i;
-            button.textContent = this._renderCommand(command);
+            button.textContent = command.label;
+            button.title = this._renderCommand(command.cmd);
             list.appendChild(button);
         });
 
         this.commandsPanel.appendChild(list);
     }
 
-    _renderCommand(command) {
-        const text = this.state.selectedCoord
-            ? command.replace(/\{coord\}/g, this.state.selectedCoord)
-            : command;
-        return text.replace(/;\s*$/, "");
+    _renderCommand(cmd) {
+        return this.state.selectedCoord
+            ? cmd.replace(/\{coord\}/g, this.state.selectedCoord)
+            : cmd;
     }
 
     setSelectedCoord(coord) {
@@ -746,7 +868,8 @@
 
         this.commandsPanel.querySelectorAll(".cmd-btn").forEach(btn => {
             const i = Number(btn.dataset.index);
-            btn.textContent = this._renderCommand(this.state.commands[i]);
+            const command = this.state.commands[i];
+            if (command) btn.title = this._renderCommand(command.cmd);
         });
     }
 
@@ -854,7 +977,7 @@
 
 
     clearGrid() {
-        // Снимаем обработчики слоя явно.
+        // Снимаем обработчики слоя.
         if (this.layers.grid && this._layerHandlers) {
             const l = this.layers.grid;
             l.removeEventListener("mousemove", this._layerHandlers.onMouseMove);
@@ -862,12 +985,25 @@
             l.removeEventListener("click", this._layerHandlers.onClick);
             this._layerHandlers = null;
         }
+        // Скрываем hover-индикаторы.
+        this._hideHover();
 
-        // Удаляем слой сетки, подписи и hover.
+        // Удаляем индикаторы координаты.
+        if (this.cellColLabel) { this.cellColLabel.remove(); this.cellColLabel = null; }
+        if (this.cellRowLabel) { this.cellRowLabel.remove(); this.cellRowLabel = null; }
+
+        // Обнуляем ссылки на лейблы.
+        this.colLabels = null;
+        this.rowLabels = null;
+
+        // Удаляем hover.
+        if (this.hover) {
+            this.hover.remove();
+            this.hover = null;
+        }
+
+        // Удаляем слой и подписи.
         this.overlay.querySelectorAll(".grid-item").forEach(el => el.remove());
-
-        // Меню управления оставляем — оно переиспользуется.
-        // (удаляется только в clearAll и destroy)
 
         this.layers.grid = null;
     }
@@ -1405,8 +1541,6 @@
         this.state.gridInvisible = false;
 
         const menu = this.overlay.querySelector("#grid-resize-menu");
-
-        // Возвращаем видимость и интерактивность перед новым циклом.
         if (menu) {
             menu.style.transition = "none";
             menu.style.opacity = "1";
@@ -1433,12 +1567,8 @@
                     el.style.opacity = "0";
                 });
 
-                // После fade меню не должно ловить курсор.
-                if (menu) {
-                    menu.style.pointerEvents = "none";
-                }
+                if (menu) menu.style.pointerEvents = "none";
 
-                // Синхронизируем состояние — fade завершился, сетка невидима.
                 this.state.gridInvisible = true;
             }, 10000);
         });
