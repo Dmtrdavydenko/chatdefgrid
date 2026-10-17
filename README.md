@@ -1,5 +1,5 @@
 ﻿# chatdefgrid
-
+![grid](grid.png)
 ### Build a Grid Using the Browser Console (F12)
 
 An interactive coordinate-grid builder for browser pages, designed for use over the Twitch video player. It overlays a labelled grid on top of the page so you can click any cell to select its coordinate, then send chat messages with that coordinate inserted automatically.
