@@ -56,7 +56,6 @@
     }
 
     // Построение сетки
-
     createGrid() {
         const res = this._applyGeometry();
         if (res.error) return false;
@@ -211,6 +210,35 @@
 
     }
 
+    _readLayoutVars() {
+        const defaults = { col1: 165, col3: 180, col4: 80 };
+
+        try {
+            const saved = JSON.parse(
+                localStorage.getItem("gb-layout") || "{}"
+            );
+
+            for (const key of Object.keys(defaults)) {
+                const value = Number(saved[key]);
+
+                if (Number.isFinite(value) && value >= 40 && value <= 400) {
+                    defaults[key] = value;
+                }
+            }
+        } catch (error) {
+            console.warn("Не удалось прочитать настройки GridBuilder:", error);
+        }
+
+        return defaults;
+    }
+
+    _safeSaveLayout(data) {
+        try {
+            localStorage.setItem("gb-layout", JSON.stringify(data));
+        } catch (error) {
+            console.warn("Не удалось сохранить настройки GridBuilder:", error);
+        }
+    }
 
     _clearFadeTimers() {
         clearTimeout(this.gridFadeTimer);
@@ -281,11 +309,12 @@
 
     _applyGeometry() {
         const geo = this._computeGeometry();
+
         if (geo.error) {
             this.info.textContent = geo.error;
-            this._resetGeometry();
             return { error: geo.error };
         }
+
         const changed =
             geo.cols !== this.state.cols ||
             geo.rows !== this.state.rows ||
@@ -303,33 +332,52 @@
     _movePoint(pointNumber, dx, dy) {
         const point = this.state["p" + pointNumber];
         if (!point) return;
+
         const menu = this.overlay.querySelector("#grid-resize-menu");
         if (!menu) return;
 
-        const step = Number(menu.querySelector("#grid-move-step").value);
-        const oldX = point.x, oldY = point.y;
+        const stepInput = menu.querySelector("#grid-move-step");
+        const step = Number(stepInput?.value);
+
+        if (!Number.isFinite(step) || step <= 0) return;
+
+        const oldPoint = { x: point.x, y: point.y };
 
         point.x += dx * step;
         point.y += dy * step;
 
         const res = this._applyGeometry();
+
         if (res.error) {
-            // Откат.
-            point.x = oldX;
-            point.y = oldY;
-            this._applyGeometry();      // вернуть валидное состояние
-            this.createGrid();
+            // Откатываем координаты и сохраняем прежнюю геометрию.
+            this.state["p" + pointNumber] = oldPoint;
+
+            this.info.textContent = "Ход отменён: " + res.error;
             this._refreshPoints();
+            this.updateResizeMenuValues(menu);
             this.startGridFadeTimer();
             return;
         }
 
-        if (res.changed) this.createGrid();
-        else this.layoutGrid();
+        if (res.changed) {
+            if (!this.createGrid()) {
+                this.state["p" + pointNumber] = oldPoint;
+                this._applyGeometry();
+                this.createGrid();
+            }
+        } else {
+            this.layoutGrid();
+        }
 
         this._refreshPoints();
 
-        if (this.state.activeGridId !== null) this.updateActiveGrid();
+        const menuEl = this.overlay.querySelector("#grid-resize-menu");
+        if (menuEl) this.updateResizeMenuValues(menuEl);
+
+        if (this.state.activeGridId !== null) {
+            this.updateActiveGrid();
+        }
+
         this.startGridFadeTimer();
     }
 
@@ -349,14 +397,81 @@
 
     _parseCommands(text) {
         const result = [];
-        const re = /\(\(([^()]+)\)\(([^()]+)\)\)/g;
-        let m;
+        let i = 0;
 
-        while ((m = re.exec(text)) !== null) {
-            result.push({ label: m[1].trim(), cmd: m[2].trim() });
+        while (i < text.length) {
+            // Ищем начало очередной команды "((..."
+            if (text[i] !== '(' || text[i + 1] !== '(') {
+                i++;
+                continue;
+            }
+
+            // Ищем парную "))" для этой внешней пары — со счётчиком глубины.
+            let depth = 0;
+            let end = -1;
+            for (let j = i; j < text.length; j++) {
+                if (text[j] === '(') depth++;
+                else if (text[j] === ')') {
+                    depth--;
+                    if (depth === 0) { end = j; break; }
+                }
+            }
+
+            if (end === -1) break; // непарная "((" — дальше смысла искать нет
+
+            // Всё, что между "((" и последней ")"
+            const inner = text.slice(i + 2, end);
+
+            // --- Разбор label: до первой ")" на глубине 0 ---
+            let labelDepth = 0;
+            let labelEnd = -1;
+            for (let k = 0; k < inner.length; k++) {
+                const c = inner[k];
+                if (c === '(') labelDepth++;
+                else if (c === ')') {
+                    if (labelDepth === 0) { labelEnd = k; break; }
+                    labelDepth--;
+                }
+            }
+
+            let parsed = null;
+
+            if (labelEnd !== -1) {
+                const label = inner.slice(0, labelEnd).trim();
+
+                // Пропускаем пробелы и ждём "("
+                let m = labelEnd + 1;
+                while (m < inner.length && /\s/.test(inner[m])) m++;
+
+                if (inner[m] === '(') {
+                    m++;
+
+                    // --- Разбор cmd: до первой ")" на глубине 0 ---
+                    let cmdDepth = 0;
+                    let cmdEnd = -1;
+                    for (let n = m; n < inner.length; n++) {
+                        const c = inner[n];
+                        if (c === '(') cmdDepth++;
+                        else if (c === ')') {
+                            if (cmdDepth === 0) { cmdEnd = n; break; }
+                            cmdDepth--;
+                        }
+                    }
+
+                    if (cmdEnd !== -1) {
+                        const cmd = inner.slice(m, cmdEnd).trim();
+                        if (cmd) parsed = { label, cmd };
+                    }
+                }
+            }
+
+            if (parsed) result.push(parsed);
+
+            // Продолжаем со следующего символа после "))"
+            i = end + 1;
         }
 
-        // Если формат не распознан — считаем весь текст одной командой.
+        // Фолбэк — если ни одной валидной команды не нашли.
         if (result.length === 0) {
             const t = text.trim();
             if (t) result.push({ label: t, cmd: t });
@@ -366,6 +481,8 @@
     }
 
     twitchSend(text) {
+        if (!text || !text.trim()) return;
+
         const box = document.querySelector(
             '[data-a-target="chat-input"][contenteditable="true"]'
         );
@@ -450,7 +567,8 @@
 
     setGridInvisible(value) {
         this._clearFadeTimers();
-        this.state.gridInvisible = value;
+        this.state.gridInvisible = Boolean(value);
+        const invisible = this.state.gridInvisible;
 
         // Сетка и подписи — fade.
         this.overlay.querySelectorAll(".grid-item, .point-marker").forEach(el => {
@@ -468,8 +586,8 @@
 
         // Hover всегда opacity 1 — подсветка клетки под курсором.
         if (this.hover) {
-            this.hover.style.transition = "none";
-            this.hover.style.opacity = "1";
+            this.hover.style.opacity = invisible ? "0" : "1";
+            if (invisible) this.hover.style.display = "none";
         }
     }
 
@@ -535,14 +653,12 @@
     }
 
     _applyLayoutVars() {
-        const saved = JSON.parse(localStorage.getItem("gb-layout") || "{}");
-        const c1 = saved.col1 ?? 165;
-        const c3 = saved.col3 ?? 180;
-        const c4 = saved.col4 ?? 80;
+        const saved = this._readLayoutVars();
 
-        this.overlay.style.setProperty("--gb-col1", c1 + "px");
-        this.overlay.style.setProperty("--gb-col3", c3 + "px");
-        this.overlay.style.setProperty("--gb-col4", c4 + "px");
+        this.overlay.style.setProperty("--gb-col1", saved.col1 + "px");
+        this.overlay.style.setProperty("--gb-col3", saved.col3 + "px");
+        this.overlay.style.setProperty("--gb-col4", saved.col4 + "px");
+
     }
 
     // Информационная панель
@@ -806,15 +922,19 @@
 
     showInfo() {
         // Если уже показано — скрыть.
-        if (this.zone2.dataset.shown === "1") {
-            this.zone2.innerHTML = "";
+        const existingHelp = this.zone2.querySelector(".gb-help");
+
+        if (existingHelp) {
+            existingHelp.remove();
             this.zone2.dataset.shown = "0";
+
             if (this.info) this.info.style.display = "";
             return;
         }
 
         this._injectStyles();
         this.zone2.dataset.shown = "1";
+
         if (this.info) this.info.style.display = "none";
 
         const col = (c) => `<div class="col">${c}</div>`;
@@ -923,7 +1043,7 @@
     }
 
     _fillLayoutInputs() {
-        const saved = JSON.parse(localStorage.getItem("gb-layout") || "{}");
+        const saved = this._readLayoutVars();
         const values = {
             "--gb-col1": saved.col1 ?? 165,
             "--gb-col3": saved.col3 ?? 180,
@@ -940,12 +1060,13 @@
             getComputedStyle(this.overlay).getPropertyValue(name), 10
         ) || 0;
 
-        localStorage.setItem("gb-layout", JSON.stringify({
+        this._safeSaveLayout({
             col1: gv("--gb-col1"),
             col3: gv("--gb-col3"),
             col4: gv("--gb-col4")
-        }));
+        });
     }
+
     _resetLayoutVars() {
         this.overlay.style.setProperty("--gb-col1", "165px");
         this.overlay.style.setProperty("--gb-col3", "180px");
@@ -961,7 +1082,6 @@
             input.value = v;
         });
     }
-
 
     createCommandsPanel() {
         this.commandsPanel = document.createElement("div");
@@ -1060,7 +1180,6 @@
     }
 
     // Управление видеоплеером
-
     hidePlayer() {
         const el = document.querySelector(
             ".video-player__default-player"
@@ -1078,16 +1197,13 @@
     }
 
     //
-
     hidePanel() {
-        // Сохраняем исходный display перед скрытием
+        if (!this.state.visible) return;
         this.state.overlayDisplay = this.overlay.style.display;
-
         this.overlay.style.display = "none";
         this.state.visible = false;
-
-
     }
+
     restorePlayer() {
         if (!this.player) return;
 
@@ -1098,6 +1214,7 @@
 
         this.player = null;
     }
+
     restorePanel() {
         // Восстанавливаем сохранённый display
         this.overlay.style.display =
@@ -1107,8 +1224,15 @@
     }
     // Установка точки
     setPoint(number) {
-        this.hidePlayer();
+        if (!this.state.visible) {
+            console.log("GridBuilder: оверлей скрыт (Shift+1), точка не поставлена");
+            return;
+        }
 
+        // Если был fade или Shift+3 — снять прозрачность и сбросить таймеры.
+        this.setGridInvisible(false);
+
+        // Установить/переставить точку.
         this.state["p" + number] = {
             x: this.mouse.x,
             y: this.mouse.y
@@ -1129,14 +1253,13 @@
             this.saveCurrentGrid();
             this._finishGridSetup();
             this.info.innerHTML = `
-        Сетка готова.
+    Сетка готова.
 
-        <hr>
+    <hr>
 
-        Нажми F2 для справки
-    `;
+    Нажми F2 для справки
+`;
         }
-
     }
 
     // Создание или обновление маркера
@@ -1155,8 +1278,6 @@
     }
 
     // Очистка элементов сетки
-
-
     clearGrid() {
         // Снимаем обработчики слоя.
         if (this.layers.grid && this._layerHandlers) {
@@ -1189,9 +1310,9 @@
         this.layers.grid = null;
     }
 
-
     // Русские обозначения колонок: А, Б, ... Ё, Ж ...
     cyr(num) {
+        if (!Number.isFinite(num) || num < 1) return "";
         const letters = [
             "А", "Б", "В", "Г", "Д", "Е", "Ё", "Ж", "З",
             "И", "Й", "К", "Л", "М", "Н", "О", "П",
@@ -1209,7 +1330,6 @@
 
         return result;
     }
-
 
     // Боковая панель перемещения точек
     createResizeMenu() {
@@ -1276,7 +1396,6 @@
         this.updateResizeMenuValues(menu);
     }
 
-
     createMoveControls(controls) {
         controls.className = "gb-move-controls";
 
@@ -1322,8 +1441,6 @@
     }
 
     // Полный сброс сетки с сохранением скрипта
-
-
     clearAll() {
         // Останавливаем таймеры прозрачности.
         this._clearFadeTimers();
@@ -1371,7 +1488,6 @@
 
         this.restorePlayer();
     }
-
     // Справка
     showHelp() {
         this.showInfo();
@@ -1379,7 +1495,6 @@
     // ===============================
     // СОХРАНЕНИЕ СЕТОК
     // ===============================
-
     saveCurrentGrid() {
         const { p1, p2, p3, cols, rows } = this.state;
 
@@ -1425,8 +1540,12 @@
             return;
         }
 
+
+        let id = Date.now();
+        while (this.state.savedGrids.some(g => g.id === id)) id++;
+
         const grid = {
-            id: Date.now(),
+            id,
 
             p1: { x: p1.x, y: p1.y },
             p2: { x: p2.x, y: p2.y },
@@ -1448,7 +1567,6 @@
     }
 
     // Название сетки.
-    // Например: Ж20
     getGridName(grid = null) {
 
         if (!grid) {
@@ -1504,50 +1622,73 @@
     }
 
     // Загрузить сохранённую сетку
-
     loadGrid(grid) {
-        // Если передан ID, находим соответствующую сохранённую сетку.
         if (typeof grid === "number") {
             grid = this.state.savedGrids.find(g => g.id === grid);
         }
 
         if (!grid || !grid.p1 || !grid.p2 || !grid.p3) {
             console.error("Не удалось загрузить сетку:", grid);
-            return;
+            return false;
         }
 
-        // Останавливаем предыдущий таймер исчезновения.
-        this._clearFadeTimers();
+        const points = [grid.p1, grid.p2, grid.p3];
 
+        if (!points.every(p =>
+            Number.isFinite(p.x) && Number.isFinite(p.y)
+        )) {
+            console.error("Некорректные координаты сохранённой сетки:", grid);
+            return false;
+        }
 
-        // Загружаем координаты.
+        const previous = {
+            p1: this.state.p1,
+            p2: this.state.p2,
+            p3: this.state.p3,
+            activeGridId: this.state.activeGridId
+        };
+
         this.state.p1 = { ...grid.p1 };
         this.state.p2 = { ...grid.p2 };
         this.state.p3 = { ...grid.p3 };
-        this.state.activeGridId = grid.id;
 
-        // Снимаем прозрачность.
-        this.state.gridInvisible = false;
+        const geometry = this._computeGeometry();
 
-        // Если оверлей был скрыт через Shift + 1, показываем его.
-        this.restorePanel();
+        if (geometry.error) {
+            this.state.p1 = previous.p1;
+            this.state.p2 = previous.p2;
+            this.state.p3 = previous.p3;
+            this.state.activeGridId = previous.activeGridId;
 
-        // Перестраиваем сетку и маркеры.
-        if (!this.createGrid()) {
-            console.error("Не удалось построить сетку из сохранённых данных:", grid);
-            return;
+            this.info.textContent =
+                "Не удалось загрузить сетку: " + geometry.error;
+
+            return false;
         }
 
-        //this.addPoint(this.state.p1, 1);
-        //this.addPoint(this.state.p2, 2);
-        //this.addPoint(this.state.p3, 3);
+        this._clearFadeTimers();
 
-        // Показываем сетку и запускаем новый таймер.
-        //this.setGridInvisible(false);
-        //this.startGridFadeTimer();
+        this.state.activeGridId = grid.id;
+        this.state.gridInvisible = false;
 
-        //this.updateSavedGridsPanel();
+        this.restorePanel();
+
+        if (!this.createGrid()) {
+            this.state.p1 = previous.p1;
+            this.state.p2 = previous.p2;
+            this.state.p3 = previous.p3;
+            this.state.activeGridId = previous.activeGridId;
+
+            if (previous.p1 && previous.p2 && previous.p3) {
+                this.createGrid();
+                this._refreshPoints();
+            }
+
+            return false;
+        }
+
         this._finishGridSetup();
+        return true;
     }
 
     // HTML-панель сохранённых сеток
