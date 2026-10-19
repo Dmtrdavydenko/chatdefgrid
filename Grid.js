@@ -5,6 +5,22 @@
             return window.gridBuilder;
         }
 
+        try {
+            this._init();
+        } catch (error) {
+            this._abortConstruction(error);
+            throw error;
+        }
+
+        // Флаг ставим только после успешной инициализации.
+        // Если _init() упадёт — _abortConstruction() уберёт DOM,
+        // и повторный запуск будет с чистого листа.
+        window.gridBuilder = this;
+    }
+
+    _init() {
+        this._injectStyles();
+
         this.state = {
             p1: null,
             p2: null,
@@ -19,11 +35,7 @@
             commandsSaved: false,
             selectedCoord: null,
             overlayDisplay: "grid",
-
-            // Сохранённые сетки
             savedGrids: [],
-
-            // ID выбранной сохранённой сетки
             activeGridId: null
         };
         this.state.savedGrids = this._loadSavedGrids();
@@ -36,13 +48,22 @@
         this.layers = { grid: null };
         this._layerHandlers = null;
 
+        this._sendTimer = null;
+        this._sendResolve = null;
+        this._twitchQueue = Promise.resolve();
+        this._destroyed = false;
+
+        // NEW: прямые ссылки на ключевые узлы.
+        this.colLabels = null;
+        this.rowLabels = null;
+        this.resizeMenu = null;
+        this.savedGridsPanel = null;
+
         this.createOverlay();
         this.createInfo();
         this.createCommandsPanel();
         this.createSavedGridsPanel();
         this.createResizeMenu();
-
-        //this.hidePanel();
 
         this.hidePlayer();
 
@@ -52,9 +73,33 @@
         document.addEventListener("mousemove", this.onMouseMove);
         document.addEventListener("keydown", this.onKeyDown);
 
-        window.gridBuilder = this;
-
         this.showInfo();
+    }
+
+    _abortConstruction(error) {
+        console.error("GridBuilder: сбой инициализации", error);
+
+        // Снимаем глобальные слушатели, если успели повесить.
+        if (this.onMouseMove) {
+            document.removeEventListener("mousemove", this.onMouseMove);
+        }
+        if (this.onKeyDown) {
+            document.removeEventListener("keydown", this.onKeyDown);
+        }
+
+        // Убираем созданные DOM-узлы.
+        try { this.overlay?.remove(); } catch (_) { /* ignore */ }
+        const style = document.getElementById("gb-styles");
+        if (style) style.remove();
+
+        // Возвращаем плеер, если успели его скрыть.
+        try { this.restorePlayer(); } catch (_) { /* ignore */ }
+
+        // На случай, если флаг успел проставиться (не должен, но
+        // подстрахуемся — на будущее, если _init станет длиннее).
+        if (window.gridBuilder === this) {
+            delete window.gridBuilder;
+        }
     }
 
     // Построение сетки
@@ -67,6 +112,7 @@
         this.buildColLabels();
         this.buildRowLabels();
         this.createResizeMenu();
+        this._invalidateSelectedCoord();
         return true;
     }
 
@@ -198,20 +244,23 @@
         layer.style.height = (rows * cellH) + "px";
         layer.style.backgroundSize = `${cellW}px ${cellH}px`;
 
-        // Буквы сверху.
-        this.overlay.querySelectorAll(".col-label").forEach((el, x) => {
-            el.style.left = (p1.x + x * cellW + cellW / 2) + "px";
-            el.style.top = (p1.y - 20) + "px";
-            el.style.display = cellW >= 14 ? "block" : "none";
-        });
+        // Буквы сверху — по прямым ссылкам, без querySelectorAll.
+        if (this.colLabels) {
+            this.colLabels.forEach((el, x) => {
+                el.style.left = (p1.x + x * cellW + cellW / 2) + "px";
+                el.style.top = (p1.y - 20) + "px";
+                el.style.display = cellW >= 14 ? "block" : "none";
+            });
+        }
 
-        // Цифры слева.
-        this.overlay.querySelectorAll(".row-label").forEach((el, y) => {
-            el.style.left = (p1.x - 8) + "px";
-            el.style.top = (p1.y + y * cellH + cellH / 2) + "px";
-            el.style.display = cellH >= 14 ? "block" : "none";
-        });
-
+        // Цифры слева — по прямым ссылкам.
+        if (this.rowLabels) {
+            this.rowLabels.forEach((el, y) => {
+                el.style.left = (p1.x - 8) + "px";
+                el.style.top = (p1.y + y * cellH + cellH / 2) + "px";
+                el.style.display = cellH >= 14 ? "block" : "none";
+            });
+        }
     }
 
     _readLayoutVars() {
@@ -411,7 +460,7 @@
         const point = this.state["p" + pointNumber];
         if (!point) return;
 
-        const menu = this.overlay.querySelector("#grid-resize-menu");
+        const menu = this.resizeMenu;
         if (!menu) return;
 
         const stepInput = menu.querySelector("#grid-move-step");
@@ -449,7 +498,7 @@
 
         this._refreshPoints();
 
-        const menuEl = this.overlay.querySelector("#grid-resize-menu");
+        const menuEl = this.resizeMenu;
         if (menuEl) this.updateResizeMenuValues(menuEl);
 
         if (this.state.activeGridId !== null) {
@@ -468,6 +517,7 @@
 
     _parseCommands(text) {
         const result = [];
+        const errors = [];
         let i = 0;
 
         while (i < text.length) {
@@ -488,9 +538,12 @@
                 }
             }
 
-            if (end === -1) break; // непарная "((" — дальше смысла искать нет
+            if (end === -1) {
+                const snippet = text.slice(i, i + 40);
+                errors.push(`Незакрытый блок "((..." в позиции ${i}: "${snippet}${text.length > i + 40 ? "…" : ""}"`);
+                break;
+            }
 
-            // Всё, что между "((" и последней ")"
             const inner = text.slice(i + 2, end);
 
             // --- Разбор label: до первой ")" на глубине 0 ---
@@ -536,24 +589,57 @@
                 }
             }
 
-            if (parsed) result.push(parsed);
+            if (parsed) {
+                result.push(parsed);
+            } else {
+                errors.push(`Неверный формат блока: "${text.slice(i, end + 1)}"`);
+            }
 
             // Продолжаем со следующего символа после "))"
             i = end + 1;
         }
 
-        // Фолбэк — если ни одной валидной команды не нашли.
-        if (result.length === 0) {
-            const t = text.trim();
-            if (t) result.push({ label: t, cmd: t });
+        // Пустой ввод — не ошибка.
+        if (result.length === 0 && errors.length === 0) {
+            const trimmed = text.trim();
+            if (!trimmed) return { commands: [] };
+
+            // Плоский текст без скобок разрешаем как одну команду
+            // (быстрый сценарий «!профиль»). Как только появились скобки —
+            // считаем, что пользователь пытался использовать формат.
+            if (!/[()]/.test(trimmed)) {
+                return { commands: [{ label: trimmed, cmd: trimmed }] };
+            }
+
+            return {
+                commands: [],
+                error: "Не найдено ни одной команды формата ((Название)(команда))"
+            };
         }
 
-        return result;
+        // Любая ошибка парсинга → не сохраняем ничего, возвращаем причину.
+        if (errors.length > 0) {
+            return { commands: [], error: errors.join("; ") };
+        }
+
+        return { commands: result };
     }
 
     twitchSend(text) {
-        if (!text || !text.trim()) return;
+        if (!text || !text.trim()) return this._twitchQueue;
+        this._twitchQueue = this._twitchQueue
+            .then(() => {
+                if (this._destroyed) return;
+                return this._twitchSendInternal(text);
+            })
+            .catch(error => {
+                console.warn("Twitch send error:", error);
+            });
 
+        return this._twitchQueue;
+    }
+
+    async _twitchSendInternal(text) {
         const box = document.querySelector(
             '[data-a-target="chat-input"][contenteditable="true"]'
         );
@@ -561,78 +647,144 @@
             console.log("Поле не найдено");
             return;
         }
-        // фокус
-        box.focus();
-        // курсор в конец
-        const range = document.createRange();
-        range.selectNodeContents(box);
-        range.collapse(false);
 
-        const selection = window.getSelection();
-        selection.removeAllRanges();
-        selection.addRange(range);
-
-        // очистка старого
-        document.execCommand("selectAll", false, null);
-
-        // вставка как пользователь
-        document.execCommand(
-            "insertText",
-            false,
-            text
+        // Синхронизация со Slate/React: двойной rAF.
+        const syncFrame = () => new Promise(resolve =>
+            requestAnimationFrame(() => requestAnimationFrame(resolve))
         );
 
-        // события для React/Slate
-        box.dispatchEvent(
-            new InputEvent("beforeinput", {
+        const sleep = (ms) => new Promise(r => setTimeout(r, ms));
+
+        const focusBox = () => {
+            if (document.activeElement !== box) box.focus();
+        };
+
+        focusBox();
+
+        // --- 1. Очистка старого содержимого ---
+        if (box.textContent && box.textContent.length > 0) {
+            const selection = window.getSelection();
+            const clearRange = document.createRange();
+            clearRange.selectNodeContents(box);
+            selection.removeAllRanges();
+            selection.addRange(clearRange);
+
+            await syncFrame();
+
+            const deleteEvent = new InputEvent("beforeinput", {
                 bubbles: true,
                 cancelable: true,
-                inputType: "insertText",
-                data: text
-            })
-        );
+                composed: true,
+                inputType: "deleteContentBackward",
+                data: null
+            });
+            box.dispatchEvent(deleteEvent);
 
-        box.dispatchEvent(
-            new InputEvent("input", {
-                bubbles: true,
-                inputType: "insertText",
-                data: text
-            })
-        );
-
-        // небольшая задержка перед отправкой
-        setTimeout(() => {
-
-            const button = document.querySelector(
-                'button[data-a-target="chat-send-button"]'
-            );
-
-            if (!button) {
-                console.log("Кнопка не найдена");
-                return;
+            if (!deleteEvent.defaultPrevented) {
+                document.execCommand("delete", false, null);
             }
 
-            // настоящий клик мыши
-            button.dispatchEvent(
-                new MouseEvent("mousedown", {
+            await syncFrame();
+
+            // Страховка, если Slate «съел» событие, но не очистил.
+            if (box.textContent && box.textContent.length > 0) {
+                const selection2 = window.getSelection();
+                const fallbackRange = document.createRange();
+                fallbackRange.selectNodeContents(box);
+                selection2.removeAllRanges();
+                selection2.addRange(fallbackRange);
+
+                await syncFrame();
+
+                const fallbackDelete = new InputEvent("beforeinput", {
                     bubbles: true,
                     cancelable: true,
-                    view: window
-                })
-            );
+                    composed: true,
+                    inputType: "deleteContentBackward",
+                    data: null
+                });
+                box.dispatchEvent(fallbackDelete);
 
-            button.dispatchEvent(
-                new MouseEvent("mouseup", {
-                    bubbles: true,
-                    cancelable: true,
-                    view: window
-                })
-            );
+                if (!fallbackDelete.defaultPrevented) {
+                    document.execCommand("delete", false, null);
+                }
 
-            button.click();
+                await syncFrame();
+            }
+        }
 
-        }, 1000 + Math.random() * 1000);
+        // --- 2. Курсор в конец ---
+        focusBox();
+        {
+            const selection = window.getSelection();
+            const range = document.createRange();
+            range.selectNodeContents(box);
+            range.collapse(false);
+            selection.removeAllRanges();
+            selection.addRange(range);
+        }
 
+        await syncFrame();
+
+        // --- 3. Вставка текста ---
+        const beforeInput = new InputEvent("beforeinput", {
+            bubbles: true,
+            cancelable: true,
+            composed: true,
+            inputType: "insertText",
+            data: text
+        });
+        box.dispatchEvent(beforeInput);
+
+        if (!beforeInput.defaultPrevented) {
+            document.execCommand("insertText", false, text);
+        }
+
+        await syncFrame();
+
+        // --- 4. Страховка: если текст не попал в поле ---
+        if (!box.textContent.includes(text)) {
+            const selection = window.getSelection();
+            const range = document.createRange();
+            range.selectNodeContents(box);
+            range.collapse(false);
+            selection.removeAllRanges();
+            selection.addRange(range);
+
+            await syncFrame();
+
+            document.execCommand("insertText", false, text);
+        }
+
+        // --- 5. Отправка (ждём таймер, чтобы очередь не продолжилась раньше) ---
+        await new Promise(resolve => {
+            this._sendResolve = resolve; 
+            this._sendTimer = setTimeout(() => {
+                this._sendTimer = null;
+                this._sendResolve = null; 
+
+
+                if (this._destroyed) { resolve(); return; }
+
+                const button = document.querySelector(
+                    'button[data-a-target="chat-send-button"]'
+                );
+                if (!button) {
+                    console.log("Кнопка не найдена");
+                    resolve();
+                    return;
+                }
+
+                button.dispatchEvent(new MouseEvent("mousedown", {
+                    bubbles: true, cancelable: true, view: window
+                }));
+                button.dispatchEvent(new MouseEvent("mouseup", {
+                    bubbles: true, cancelable: true, view: window
+                }));
+                button.click();
+                resolve();
+            }, 1000 + Math.random() * 1000);
+        });
     }
     //twitchSend("!профиль");
 
@@ -648,7 +800,7 @@
         });
 
         // Меню — opacity + pointer-events.
-        const menu = this.overlay.querySelector("#grid-resize-menu");
+        const menu = this.resizeMenu;
         if (menu) {
             menu.style.transition = "none";
             menu.style.opacity = value ? "0" : "1";
@@ -891,6 +1043,11 @@
         box-sizing:border-box; resize:none; padding:3px; background:rgba(0,0,0,.3);
         color:#efeff1; border:1px solid #3a3a3d; border-radius:8px; outline:none;
         font-family:monospace; font-size:14px; line-height:1.5; }
+    .gb-cmd-textarea.gb-cmd-textarea-error {
+        border-color: #ff5c5c;
+        box-shadow: 0 0 0 1px rgba(255,92,92,.55);
+        background: rgba(80,20,20,.35);
+    }
     .gb-cmd-edit { display:block; width:100%; box-sizing:border-box; padding:10px;
         margin-bottom:10px; cursor:pointer;
         background:linear-gradient(135deg,#9147ff,#5c2d99); color:#fff;
@@ -989,6 +1146,16 @@
     .gb-move-btn { min-height:30px; cursor:pointer; border:1px solid #666;
         border-radius:4px; background:#333; color:white; font-size:16px; }
     .gb-move-btn:disabled { cursor:default; background:transparent; }
+    .gb-resize-menu.gb-help-locked .move-btn:not(:disabled) {
+        cursor: not-allowed;
+        opacity: 0.55;
+        background: #2a2a2a;
+        border-color: #444;
+    }
+    .gb-resize-menu.gb-help-locked .move-btn:not(:disabled):hover {
+        background: #2a2a2a;
+        border-color: #444;
+    }
 
     /* ===== Saved grids panel ===== */
     .gb-saved-panel { position:absolute; left:0; top:10px; width:100%;
@@ -1033,10 +1200,14 @@
             if (snap) {
                 if (this.info) this.info.style.display = snap.infoDisplay;
 
-                const menu = this.overlay.querySelector("#grid-resize-menu");
+                const menu = this.resizeMenu;
                 if (menu) {
                     menu.style.opacity = snap.menuOpacity;
                     menu.style.pointerEvents = snap.menuPointerEvents;
+
+                    // NEW: снять замок и восстановить title/disabled по точкам.
+                    menu.classList.remove("gb-help-locked");
+                    this.updateResizeMenuValues(menu);
                 }
                 this._helpSnapshot = null;
             }
@@ -1045,7 +1216,7 @@
         }
 
         // Открытие: снять снимок текущего состояния.
-        const menu = this.overlay.querySelector("#grid-resize-menu");
+        const menu = this.resizeMenu;
         this._helpSnapshot = {
             infoDisplay: this.info ? this.info.style.display : "",
             menuOpacity: menu ? menu.style.opacity : "",
@@ -1055,7 +1226,6 @@
         // Остановить fade, чтобы за время help состояние не «уехало».
         this._clearFadeTimers();
 
-        this._injectStyles();
         this.zone2.dataset.shown = "1";
         if (this.info) this.info.style.display = "none";
 
@@ -1064,6 +1234,10 @@
             menu.style.transition = "none";
             menu.style.opacity = "1";
             menu.style.pointerEvents = "auto";
+
+            // NEW: замок на кнопки движения.
+            menu.classList.add("gb-help-locked");
+            this.updateResizeMenuValues(menu);
         }
 
         this._showZoneOutlines();
@@ -1228,6 +1402,25 @@
         }
     }
 
+    _invalidateSelectedCoord() {
+        if (this.state.selectedCoord === null) return;
+
+        this.state.selectedCoord = null;
+
+        if (!this.state.commandsSaved) return;
+
+        this.commandsPanel
+            ?.querySelectorAll(".cmd-btn")
+            .forEach(btn => {
+                const i = Number(btn.dataset.index);
+                const command = this.state.commands[i];
+
+                if (command) {
+                    this._updateCommandButtonState(btn, command);
+                }
+            });
+    }
+
     createCommandsPanel() {
         this.commandsPanel = document.createElement("div");
         this.commandsPanel.className = "gb-cmd-panel";
@@ -1280,9 +1473,22 @@
         textarea.className = "gb-cmd-textarea";
 
         saveButton.addEventListener("click", () => {
-            this.state.commands = this._parseCommands(textarea.value);
+            const parsed = this._parseCommands(textarea.value);
+
+            if (parsed.error) {
+                textarea.classList.add("gb-cmd-textarea-error");
+                this.info.textContent = "Ошибка в командах: " + parsed.error;
+                return;
+            }
+
+            textarea.classList.remove("gb-cmd-textarea-error");
+            this.state.commands = parsed.commands;
             this.state.commandsSaved = true;
             this.showCommandsButtons();
+        });
+
+        textarea.addEventListener("input", () => {
+            textarea.classList.remove("gb-cmd-textarea-error");
         });
 
         this.commandsPanel.append(saveButton, textarea);
@@ -1419,7 +1625,6 @@
                 this._refreshPoints();
                 return;
             }
-            if (!this.createGrid()) return;
             this.saveCurrentGrid();
             this._finishGridSetup();
             this.info.textContent = "Сетка готова. Нажми F2 для справки";
@@ -1497,18 +1702,16 @@
 
     // Боковая панель перемещения точек
     createResizeMenu() {
-        const { p1, p2, p3 } = this.state;
-        //if (!p1 || !p2 || !p3) return;
+        const prevStep = this.resizeMenu
+            ? this.resizeMenu.querySelector("#grid-move-step")?.value
+            : undefined;
 
-        let menu = this.overlay.querySelector("#grid-resize-menu");
-        const prevStep = this.overlay.querySelector("#grid-move-step")?.value;
+        if (!this.resizeMenu) {
+            this.resizeMenu = document.createElement("div");
+            this.resizeMenu.id = "grid-resize-menu";
+            this.resizeMenu.className = "gb-resize-menu";
 
-        if (!menu) {
-            menu = document.createElement("div");
-            menu.id = "grid-resize-menu";
-            menu.className = "gb-resize-menu";
-
-            menu.innerHTML = `
+            this.resizeMenu.innerHTML = `
             <div style="font-weight:bold;font-size:15px;margin-bottom:12px">
                 Управление точками
             </div>
@@ -1539,9 +1742,12 @@
             </div>
         `;
 
-            menu.addEventListener("click", (e) => {
+            this.resizeMenu.addEventListener("click", (e) => {
                 const btn = e.target.closest(".move-btn");
                 if (!btn || btn.disabled) return;
+
+                if (this.resizeMenu.classList.contains("gb-help-locked")) return;
+
                 const pointNumber = Number(btn.dataset.point);
                 const dx = Number(btn.dataset.dx);
                 const dy = Number(btn.dataset.dy);
@@ -1549,16 +1755,17 @@
                 this._movePoint(pointNumber, dx, dy);
             });
 
-            this.zone3.appendChild(menu);
-            menu.querySelectorAll(".move-controls").forEach(controls => {
-                this.createMoveControls(controls, menu);
+            this.zone3.appendChild(this.resizeMenu);
+
+            this.resizeMenu.querySelectorAll(".move-controls").forEach(controls => {
+                this.createMoveControls(controls, this.resizeMenu);
             });
         }
 
         if (prevStep !== undefined) {
-            menu.querySelector("#grid-move-step").value = prevStep;
+            this.resizeMenu.querySelector("#grid-move-step").value = prevStep;
         }
-        this.updateResizeMenuValues(menu);
+        this.updateResizeMenuValues(this.resizeMenu);
     }
 
     createMoveControls(controls) {
@@ -1600,9 +1807,21 @@
                 : `X: —<br>Y: —`;
         });
 
-        // Блокируем кнопки у точек, которых ещё нет.
+        const locked = menu.classList.contains("gb-help-locked");
+
         menu.querySelectorAll(".move-btn").forEach(btn => {
-            btn.disabled = !this.state["p" + btn.dataset.point];
+            const pointNumber = Number(btn.dataset.point);
+            const hasPoint = Boolean(this.state["p" + pointNumber]);
+
+            btn.disabled = !hasPoint;
+
+            if (!hasPoint) {
+                btn.title = "";
+            } else if (locked) {
+                btn.title = "Закройте справку (F2), чтобы управлять точками";
+            } else {
+                btn.title = `Переместить точку ${pointNumber}`;
+            }
         });
 
         menu.querySelector("#grid-cols-value").textContent = this.state.cols || "—";
@@ -1625,13 +1844,6 @@
 
         this.overlay.querySelectorAll(".point-marker").forEach(el => el.remove());
 
-        const menu = this.overlay.querySelector("#grid-resize-menu");
-        if (menu) {
-            menu.style.opacity = "1";
-            menu.style.pointerEvents = "auto";
-            this.updateResizeMenuValues(menu);
-        }
-
         this.state.p1 = null;
         this.state.p2 = null;
         this.state.p3 = null;
@@ -1641,10 +1853,16 @@
         this.state.rows = 0;
         this.state.cols = 0;
 
+        const menu = this.resizeMenu;
+        if (menu) {
+            menu.style.opacity = "1";
+            menu.style.pointerEvents = "auto";
+            this.updateResizeMenuValues(menu);
+        }
+
         // Снимаем выбор, но НЕ удаляем из savedGrids.
         this.state.activeGridId = null;
         this.state.gridInvisible = false;
-        this.state.gridFaded = false;
         this.state.selectedCoord = null;
         this.state.commandsSaved = false;
 
@@ -1652,8 +1870,6 @@
 
         this.info.textContent =
             "Ожидание точки 1. Наведите курсор на левый верхний угол и нажмите 1";
-
-        this.restorePlayer();
     }
     // Удаление слота — отдельная операция.
     deleteSavedGrid(id) {
@@ -1680,7 +1896,7 @@
         }
 
         const grid = {
-            id: this.state.activeGridId ?? Date.now(),
+            id: this.state.activeGridId ?? this._generateGridId(),
 
             p1: { x: p1.x, y: p1.y },
             p2: { x: p2.x, y: p2.y },
@@ -1710,6 +1926,12 @@
         console.log("Автоматически сохранена готовая сетка:", grid);
     }
 
+    _generateGridId() {
+        let id = Date.now();
+        while (this.state.savedGrids.some(g => g.id === id)) id++;
+        return id;
+    }
+
     saveNewGridSlot() {
         const { p1, p2, p3, cols, rows } = this.state;
 
@@ -1718,12 +1940,8 @@
             return;
         }
 
-
-        let id = Date.now();
-        while (this.state.savedGrids.some(g => g.id === id)) id++;
-
         const grid = {
-            id,
+            id: this._generateGridId(),
 
             p1: { x: p1.x, y: p1.y },
             p2: { x: p2.x, y: p2.y },
@@ -1738,7 +1956,7 @@
         this.state.savedGrids.push(grid);
 
         this.state.activeGridId = grid.id;
-        this._saveSavedGrids()
+        this._saveSavedGrids();
         this.updateSavedGridsPanel();
 
         console.log("Создан новый слот:", grid);
@@ -1872,20 +2090,18 @@
 
     // HTML-панель сохранённых сеток
     createSavedGridsPanel() {
-        let panel = this.zone4.querySelector("#saved-grids-panel");   // ← искать только в своей зоне
+        if (this.savedGridsPanel) return;
 
-        if (panel) return;
+        this.savedGridsPanel = document.createElement("div");
+        this.savedGridsPanel.id = "saved-grids-panel";
+        this.savedGridsPanel.className = "gb-saved-panel";
+        this.zone4.appendChild(this.savedGridsPanel);
 
-        panel = document.createElement("div");
-        panel.id = "saved-grids-panel";
-        panel.className = "gb-saved-panel";
-        this.zone4.appendChild(panel);
-
-        panel.addEventListener("click", (e) => {
-            if (this.zone2.dataset.shown === "1") return;   // help открыт — загрузка заблокирована
+        this.savedGridsPanel.addEventListener("click", (e) => {
+            if (this.zone2.dataset.shown === "1") return;
 
             const btn = e.target.closest(".grid-slot");
-            if (!btn || !panel.contains(btn)) return;
+            if (!btn || !this.savedGridsPanel.contains(btn)) return;
             this.loadGrid(Number(btn.dataset.id));
         });
 
@@ -1894,9 +2110,8 @@
 
     // Обновить HTML кнопок
     updateSavedGridsPanel() {
-        const panel = this.zone4.querySelector("#saved-grids-panel");
-        if (!panel) return;
-        this._rebuildSavedGridsPanel(panel);
+        if (!this.savedGridsPanel) return;
+        this._rebuildSavedGridsPanel(this.savedGridsPanel);
     }
 
     _rebuildSavedGridsPanel(panel) {
@@ -1928,6 +2143,13 @@
     }
 
     onKeyDown(e) {
+        if (e.repeat) return;
+        // F2 — всегда, даже из полей ввода help-панели
+        if (e.code === "F2") {
+            e.preventDefault();
+            this.showHelp();
+            return;
+        }
         // 1. Не перехватываем клавиши при вводе в поле
         const tag = e.target?.tagName;
         const typing = ["INPUT", "TEXTAREA", "SELECT"].includes(tag) ||
@@ -1936,22 +2158,15 @@
 
         // 2. Не мешаем системным сочетаниям
         if (e.ctrlKey || e.altKey || e.metaKey) return;
-        if (e.repeat) return;
 
         const helpOpen = this.zone2.dataset.shown === "1";
         const code = e.code;   // ← единый источник истины
 
-        // 3. F2 — всегда (нужно для закрытия справки)
-        if (code === "F2") {
-            e.preventDefault();
-            this.showHelp();
-            return;
-        }
-
         // 4. Shift+1 — всегда (переключение оверлея)
-        if (e.shiftKey && code === "Digit1") {
+        if (e.shiftKey && (code === "Digit1" || code === "Numpad1")) {
             e.preventDefault();
             if (this.state.visible) {
+                // можно поднять в внешний if
                 this.hidePanel();
                 this.restorePlayer();
             } else {
@@ -1960,9 +2175,8 @@
             }
             return;
         }
-
         // 5. Shift+Delete — всегда (аварийное удаление скрипта)
-        if (e.shiftKey && code === "Delete") {
+        if (e.shiftKey && e.code === "Delete") {
             e.preventDefault();
             e.stopPropagation();
             this._clearFadeTimers();
@@ -1970,7 +2184,6 @@
             alert("Скрипт удалён");
             return;
         }
-
         // 6. Блокировка при открытой справке: 1/2/3 (в т.ч. numpad), Shift+S, Delete, Shift+3
         if (helpOpen) {
             if (/^(Digit|Numpad)[1-3]$/.test(code)) {
@@ -1985,16 +2198,19 @@
                 e.preventDefault();
                 return;
             }
-            if (e.shiftKey && code === "Digit3") {
+            if (
+                e.shiftKey &&
+                (code === "Digit3" || code === "Numpad3")
+            ) {
                 e.preventDefault();
                 return;
             }
         }
 
         // 7. Shift+3 — прозрачность (заблокировано, если оверлей скрыт)
-        if (e.shiftKey && code === "Digit3") {
+        if (e.shiftKey && (code === "Digit3" || code === "Numpad3")) {
             e.preventDefault();
-            if (!this.state.visible) return;
+            if (!this.state.visible) return; // переместить в верхний if блок 
             this.setGridInvisible(!this.state.gridInvisible);
             return;
         }
@@ -2015,11 +2231,12 @@
             return;
         }
 
-        // 10. 1/2/3 — установка точек (верхний ряд + numpad)
+        // 10. 1/2/3 — установка точек (верхний ряд + numpad), ТОЛЬКО без Shift
         const pointMatch = /^(Digit|Numpad)([1-3])$/.exec(code);
-        if (pointMatch) {
+        if (pointMatch && !e.shiftKey) {
             e.preventDefault();
             this.setPoint(Number(pointMatch[2]));
+            return;
         }
     }
 
@@ -2029,7 +2246,7 @@
 
         this.state.gridInvisible = false;
 
-        const menu = this.overlay.querySelector("#grid-resize-menu");
+        const menu = this.resizeMenu;
         if (menu) {
             menu.style.transition = "none";
             menu.style.opacity = "1";
@@ -2065,31 +2282,50 @@
 
     // Полное удаление класса и его обработчиков
     destroy() {
-        clearTimeout(this.gridFadeTimer);
-        if (this.gridFadeFrame) cancelAnimationFrame(this.gridFadeFrame);
+        // 1. Таймеры
+        this._destroyed = true;
 
+        this._clearFadeTimers();
+
+        if (this._sendTimer) {
+            clearTimeout(this._sendTimer);
+            this._sendTimer = null;
+        }
+        if (this._sendResolve) {
+            const r = this._sendResolve;
+            this._sendResolve = null;
+            r();   // ← разблокирует очередь
+        }
+
+        // 2. DOM-слой (снимает cellColLabel/cellRowLabel через clearGrid)
         this.clearGrid();
+        this.overlay.remove();
 
+        // 3. Стили
+        document.getElementById("gb-styles")?.remove();
+
+        // 4. Глобальные слушатели
         document.removeEventListener("mousemove", this.onMouseMove);
         document.removeEventListener("keydown", this.onKeyDown);
 
+        // 5. Плеер
         this.restorePlayer();
 
-        const st = document.getElementById("gb-styles");
-        if (st) st.remove();
+        // 6. localStorage — только то, что создали сами
+        const OWNED_KEYS = ["gb-layout", "gb-saved-grids"];
+        OWNED_KEYS.forEach(k => {
+            try { localStorage.removeItem(k); } catch { }
+        });
 
-        this.overlay.remove();
-
-        // Чистим сохранённые настройки.
-        Object.keys(localStorage)
-            .filter(k => k.startsWith("gb-"))
-            .forEach(k => localStorage.removeItem(k));
-
-        if (window.gridBuilder === this) {
-            delete window.gridBuilder;
-        }
+        // 7. Глобал
+        if (window.gridBuilder === this) delete window.gridBuilder;
     }
 }
 
 // Запуск
-new GridBuilder();
+function getGridBuilder() {
+    return window.gridBuilder ?? new GridBuilder();
+}
+
+// Запуск
+getGridBuilder();
