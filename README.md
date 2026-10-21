@@ -404,6 +404,6 @@ The help panel is rendered **above all other layers** (`z-index: 1000003`) and i
 * Moving point `3` changes the grid size without changing the cell size.
 * Panel width settings persist across reloads until you press **Reset** or clear the data via `F2 → Data → Clear`.
 * `Shift + Delete` unloads the script from the page. **The script does not delete any `localStorage` data**: panel widths, saved grids, and commands are all preserved and restored on the next run. To clear the data, use `F2 → Data (localStorage) → Clear`.
-* Outgoing chat messages are queued and sent with a randomized delay of roughly `0.2 – 0.4 s` between them, so a series of rapid button clicks does not look like spam to Twitch.
-* The script is designed to run directly in the browser console (or via a userscript manager such as Tampermonkey).
-* For Twitch, the script expects the chat input (`[data-a-target="chat-input"]`) and the send button (`button[data-a-target="chat-send-button"]`) to be present in the page at the moment a command is sent.
+* Chat messages are sent one at a time with a small random delay between them.
+* * The script is designed to run directly in the browser console (or via a userscript manager such as Tampermonkey).
+* For Twitch, the chat input field and the send button must be present on the page at the moment a command is sent. If either is missing (for example, while the chat panel is collapsed or still loading), the message will not be delivered.
