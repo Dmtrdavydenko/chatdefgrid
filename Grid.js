@@ -32,13 +32,27 @@
             visible: true,
             gridInvisible: false,
             commands: [],
+            commandsRaw: null,
             commandsSaved: false,
-            selectedCoord: null,
+            selection: null, 
             overlayDisplay: "grid",
             savedGrids: [],
             activeGridId: null
         };
         this.state.savedGrids = this._loadSavedGrids();
+
+        this.state.commandsRaw = this._loadCommands();
+        if (this.state.commandsRaw !== null) {
+            const parsed = this._parseCommands(this.state.commandsRaw);
+            if (!parsed.error) {
+                this.state.commands = parsed.commands;
+                this.state.commandsSaved = true;
+            } else {
+                // Битые данные в LS — оставляем пустым, но не падаем.
+                this.state.commandsRaw = null;
+                console.warn("gb-commands повреждён, игнорируем:", parsed.error);
+            }
+        }
 
         this.mouse = { x: 0, y: 0 };
         this.player = null;
@@ -73,6 +87,9 @@
         document.addEventListener("mousemove", this.onMouseMove);
         document.addEventListener("keydown", this.onKeyDown);
 
+        this._onDocumentClick = this._onDocumentClick.bind(this);
+        document.addEventListener("click", this._onDocumentClick);
+
         this.showInfo();
     }
 
@@ -85,6 +102,9 @@
         }
         if (this.onKeyDown) {
             document.removeEventListener("keydown", this.onKeyDown);
+        }
+        if (this._onDocumentClick) {
+            document.removeEventListener("click", this._onDocumentClick);
         }
 
         // Убираем созданные DOM-узлы.
@@ -112,7 +132,8 @@
         this.buildColLabels();
         this.buildRowLabels();
         this.createResizeMenu();
-        this._invalidateSelectedCoord();
+        //this._invalidateSelectedCoord();
+        this._validateSelection();
         return true;
     }
 
@@ -135,6 +156,11 @@
         hover.style.top = "0";
         this.overlay.appendChild(hover);
         this.hover = hover;
+
+        // Оверлей выделенной клетки — постоянный, живёт отдельно от hover.
+        this.cellPinned = document.createElement("div");
+        this.cellPinned.className = "gb-cell-pinned";
+        document.body.appendChild(this.cellPinned);
 
         // Индикаторы координаты у самой клетки.
         this.cellColLabel = document.createElement("div");
@@ -177,7 +203,7 @@
         };
 
         const onClick = (e) => {
-            if (this.zone2.dataset.shown === "1") return;   // help открыт — клик игнорируется
+            if (this.zone2.dataset.shown === "1") return;   // help открыт
 
             const rect = layer.getBoundingClientRect();
             const x = Math.floor((e.clientX - rect.left) / cellW);
@@ -185,7 +211,33 @@
 
             if (x < 0 || y < 0 || x >= cols || y >= rows) return;
 
-            this.setSelectedCoord(`${this.cyr(x + 1)}${y + 1}`);
+            const coord = `${this.cyr(x + 1)}${y + 1}`;
+            const sel = this.state.selection;
+
+            // 1. Выделена команда → отправляем с этой клеткой, выделение команды оставляем.
+            if (sel?.type === 'command') {
+                const command = this.state.commands[sel.index];
+                if (command && command.cmd.includes("{coord}")) {
+                    this.twitchSend(this._renderCommand(command.cmd, coord));
+                }
+                return;
+            }
+
+            // 2. Выделена клетка → toggle/переключение.
+            if (sel?.type === 'cell') {
+                if (sel.x === x && sel.y === y) {
+                    this._setSelection(null);
+                    this.info.textContent = "Выделение снято";
+                } else {
+                    this._setSelection({ type: 'cell', x, y, coord });
+                    this.info.textContent = `Клетка ${coord} выделена`;
+                }
+                return;
+            }
+
+            // 3. Ничего не выделено → выделяем клетку.
+            this._setSelection({ type: 'cell', x, y, coord });
+            this.info.textContent = `Клетка ${coord} выделена`;
         };
 
         this._layerHandlers = { onMouseMove, onMouseLeave, onClick };
@@ -261,6 +313,7 @@
                 el.style.display = cellH >= 14 ? "block" : "none";
             });
         }
+        this._updateCellPinned();
     }
 
     _readLayoutVars() {
@@ -365,6 +418,165 @@
         }
     }
 
+    _loadCommands() {
+        try {
+            const raw = localStorage.getItem("gb-commands");
+            return raw === null ? null : raw;
+        } catch (e) {
+            console.warn("Не удалось прочитать gb-commands:", e);
+            return null;
+        }
+    }
+
+    _saveCommands(raw) {
+        try {
+            if (raw === null) localStorage.removeItem("gb-commands");
+            else localStorage.setItem("gb-commands", raw);
+        } catch (e) {
+            console.warn("Не удалось сохранить gb-commands:", e);
+        }
+    }
+
+    _fillStorageStats() {
+        if (!this.zone2) return;
+
+        const layout = localStorage.getItem("gb-layout");
+        const grids = localStorage.getItem("gb-saved-grids");
+        const cmds = localStorage.getItem("gb-commands");
+
+        const el = (id) => this.zone2.querySelector("#gb-storage-" + id);
+
+        const sizeStr = (s) => {
+            if (s === null || s === undefined) return "—";
+            return s.length > 1024 ? `${(s.length / 1024).toFixed(1)} КБ` : `${s.length} б`;
+        };
+
+        const layoutEl = el("layout");
+        if (layoutEl) layoutEl.textContent = sizeStr(layout);
+
+        const gridsEl = el("grids");
+        if (gridsEl) {
+            let n = 0;
+            try { n = JSON.parse(grids || "[]").length; } catch { /* ignore */ }
+            gridsEl.textContent = grids ? `${n} шт · ${sizeStr(grids)}` : "—";
+        }
+
+        const cmdsEl = el("commands");
+        if (cmdsEl) {
+            let count = 0;
+            if (cmds) {
+                const parsed = this._parseCommands(cmds);
+                count = parsed.error ? 0 : parsed.commands.length;
+            }
+            cmdsEl.textContent = cmds
+                ? `${count} ком. · ${sizeStr(cmds)}`
+                : "—";
+        }
+    }
+
+    _storageModal(mode) {
+        const isExport = mode === "export";
+
+        const data = {
+            "gb-layout": localStorage.getItem("gb-layout"),
+            "gb-saved-grids": localStorage.getItem("gb-saved-grids"),
+            "gb-commands": localStorage.getItem("gb-commands")
+        };
+        const initial = isExport ? JSON.stringify(data, null, 2) : "";
+
+        const wrap = document.createElement("div");
+        wrap.className = "gb-storage-modal";
+        wrap.innerHTML = `
+        <div class="gb-storage-modal-box">
+            <div class="gb-storage-modal-title">
+                ${isExport ? "📤 Экспорт данных" : "📥 Импорт данных"}
+            </div>
+            <textarea class="gb-storage-modal-text"
+                placeholder="${isExport ? "" : "Вставьте JSON из экспорта…"}"></textarea>
+            <div class="gb-storage-modal-actions">
+                <button type="button" class="gb-storage-btn"
+                    data-modal-action="cancel">Отмена</button>
+                <button type="button" class="gb-storage-btn"
+                    data-modal-action="${isExport ? "copy" : "apply"}">
+                    ${isExport ? "📋 Скопировать" : "Импортировать"}
+                </button>
+            </div>
+        </div>
+    `;
+        document.body.appendChild(wrap);
+
+        const textarea = wrap.querySelector(".gb-storage-modal-text");
+        textarea.value = initial;
+        textarea.focus();
+        if (isExport) textarea.select();
+
+        wrap.addEventListener("click", (e) => {
+            if (e.target === wrap) { wrap.remove(); return; }
+
+            const btn = e.target.closest("[data-modal-action]");
+            if (!btn) return;
+            const action = btn.dataset.modalAction;
+
+            if (action === "cancel") { wrap.remove(); return; }
+
+            if (action === "copy") {
+                textarea.select();
+                try {
+                    if (navigator.clipboard?.writeText) {
+                        navigator.clipboard.writeText(textarea.value);
+                    } else {
+                        document.execCommand("copy");
+                    }
+                    this.info.textContent = "JSON скопирован в буфер обмена";
+                } catch {
+                    this.info.textContent = "Скопируйте вручную (Ctrl+C)";
+                }
+                wrap.remove();
+                return;
+            }
+
+            if (action === "apply") {
+                let parsed;
+                try { parsed = JSON.parse(textarea.value); }
+                catch (err) {
+                    alert("Невалидный JSON: " + err.message);
+                    return;
+                }
+
+                for (const k of ["gb-layout", "gb-saved-grids", "gb-commands"]) {
+                    if (!(k in parsed)) continue;
+                    if (parsed[k] === null) localStorage.removeItem(k);
+                    else localStorage.setItem(k, parsed[k]);
+                }
+
+                wrap.remove();
+
+                if (confirm("Данные импортированы. Перезагрузить страницу, чтобы применить?")) {
+                    location.reload();
+                } else {
+                    this._fillStorageStats();
+                }
+            }
+        });
+    }
+
+    _clearStorage() {
+        if (!confirm(
+            "Удалить все данные GridBuilder из localStorage?\n\n" +
+            "• Настройки панелей\n" +
+            "• Сохранённые сетки\n" +
+            "• Команды\n\n" +
+            "Это действие необратимо. Рекомендуется сначала сделать экспорт."
+        )) return;
+
+        ["gb-layout", "gb-saved-grids", "gb-commands"].forEach(k => {
+            try { localStorage.removeItem(k); } catch { /* ignore */ }
+        });
+
+        this.info.textContent = "localStorage очищен. Перезагрузите страницу.";
+        this._fillStorageStats();
+    }
+
     _clearFadeTimers() {
         clearTimeout(this.gridFadeTimer);
         this.gridFadeTimer = null;
@@ -377,7 +589,12 @@
     _refreshPoints() {
         [1, 2, 3].forEach(n => {
             const p = this.state["p" + n];
-            if (p) this.addPoint(p, n);
+            const marker = this.overlay.querySelector(".point-marker-" + n);
+            if (p) {
+                this.addPoint(p, n);
+            } else if (marker) {
+                marker.remove();
+            }
         });
     }
 
@@ -516,113 +733,70 @@
     }
 
     _parseCommands(text) {
-        const result = [];
+        const commands = [];
         const errors = [];
-        let i = 0;
+        const lines = text.split(/\r?\n/);
 
-        while (i < text.length) {
-            // Ищем начало очередной команды "((..."
-            if (text[i] !== '(' || text[i + 1] !== '(') {
-                i++;
+        let pendingLabel = null;
+        let pendingLineNo = -1;
+
+        const flushPending = (nextLineNo) => {
+            if (pendingLabel !== null) {
+                errors.push(
+                    `Строка ${pendingLineNo + 1}: label "${pendingLabel}" ` +
+                    `без команды (строка ${nextLineNo} не начинается с "!")`
+                );
+                pendingLabel = null;
+                pendingLineNo = -1;
+            }
+        };
+
+        for (let i = 0; i < lines.length; i++) {
+            const line = lines[i].trim();
+            if (!line) continue;
+
+            if (line.includes("((") || line.includes("))")) {
+                flushPending(i + 1);
+                errors.push(`Строка ${i + 1}: старый формат ((label)(cmd)) не поддерживается`);
                 continue;
             }
 
-            // Ищем парную "))" для этой внешней пары — со счётчиком глубины.
-            let depth = 0;
-            let end = -1;
-            for (let j = i; j < text.length; j++) {
-                if (text[j] === '(') depth++;
-                else if (text[j] === ')') {
-                    depth--;
-                    if (depth === 0) { end = j; break; }
+            const bangIdx = line.indexOf("!");
+
+            // Строка начинается с "!" → это команда
+            if (bangIdx === 0) {
+                if (pendingLabel !== null) {
+                    commands.push({ label: pendingLabel, cmd: line });
+                    pendingLabel = null;
+                    pendingLineNo = -1;
+                } else {
+                    commands.push({ label: line, cmd: line });
                 }
+                continue;
             }
 
-            if (end === -1) {
-                const snippet = text.slice(i, i + 40);
-                errors.push(`Незакрытый блок "((..." в позиции ${i}: "${snippet}${text.length > i + 40 ? "…" : ""}"`);
-                break;
+            // "label !cmd" в одной строке
+            if (bangIdx > 0) {
+                flushPending(i + 1);
+                commands.push({
+                    label: line.slice(0, bangIdx).trim(),
+                    cmd: line.slice(bangIdx).trim()
+                });
+                continue;
             }
 
-            const inner = text.slice(i + 2, end);
-
-            // --- Разбор label: до первой ")" на глубине 0 ---
-            let labelDepth = 0;
-            let labelEnd = -1;
-            for (let k = 0; k < inner.length; k++) {
-                const c = inner[k];
-                if (c === '(') labelDepth++;
-                else if (c === ')') {
-                    if (labelDepth === 0) { labelEnd = k; break; }
-                    labelDepth--;
-                }
-            }
-
-            let parsed = null;
-
-            if (labelEnd !== -1) {
-                const label = inner.slice(0, labelEnd).trim();
-
-                // Пропускаем пробелы и ждём "("
-                let m = labelEnd + 1;
-                while (m < inner.length && /\s/.test(inner[m])) m++;
-
-                if (inner[m] === '(') {
-                    m++;
-
-                    // --- Разбор cmd: до первой ")" на глубине 0 ---
-                    let cmdDepth = 0;
-                    let cmdEnd = -1;
-                    for (let n = m; n < inner.length; n++) {
-                        const c = inner[n];
-                        if (c === '(') cmdDepth++;
-                        else if (c === ')') {
-                            if (cmdDepth === 0) { cmdEnd = n; break; }
-                            cmdDepth--;
-                        }
-                    }
-
-                    if (cmdEnd !== -1) {
-                        const cmd = inner.slice(m, cmdEnd).trim();
-                        if (cmd) parsed = { label, cmd };
-                    }
-                }
-            }
-
-            if (parsed) {
-                result.push(parsed);
-            } else {
-                errors.push(`Неверный формат блока: "${text.slice(i, end + 1)}"`);
-            }
-
-            // Продолжаем со следующего символа после "))"
-            i = end + 1;
+            // Нет "!" → это label, ждём следующую строку
+            flushPending(i + 1);
+            pendingLabel = line;
+            pendingLineNo = i;
         }
 
-        // Пустой ввод — не ошибка.
-        if (result.length === 0 && errors.length === 0) {
-            const trimmed = text.trim();
-            if (!trimmed) return { commands: [] };
+        flushPending(lines.length + 1);
 
-            // Плоский текст без скобок разрешаем как одну команду
-            // (быстрый сценарий «!профиль»). Как только появились скобки —
-            // считаем, что пользователь пытался использовать формат.
-            if (!/[()]/.test(trimmed)) {
-                return { commands: [{ label: trimmed, cmd: trimmed }] };
-            }
-
-            return {
-                commands: [],
-                error: "Не найдено ни одной команды формата ((Название)(команда))"
-            };
-        }
-
-        // Любая ошибка парсинга → не сохраняем ничего, возвращаем причину.
         if (errors.length > 0) {
             return { commands: [], error: errors.join("; ") };
         }
-
-        return { commands: result };
+        return { commands };
     }
 
     twitchSend(text) {
@@ -761,8 +935,7 @@
             this._sendResolve = resolve; 
             this._sendTimer = setTimeout(() => {
                 this._sendTimer = null;
-                this._sendResolve = null; 
-
+                this._sendResolve = null;
 
                 if (this._destroyed) { resolve(); return; }
 
@@ -783,7 +956,7 @@
                 }));
                 button.click();
                 resolve();
-            }, 1000 + Math.random() * 1000);
+            }, 200 + Math.random() * 200);   // 200–400 мс
         });
     }
     //twitchSend("!профиль");
@@ -847,6 +1020,15 @@
             const reset = e.target.closest(".gb-layout-reset");
             if (reset) {
                 this._resetLayoutVars();
+                return;
+            }
+            // Storage actions
+            const storageBtn = e.target.closest("[data-storage-action]");
+            if (storageBtn) {
+                const action = storageBtn.dataset.storageAction;
+                if (action === "export") this._storageModal("export");
+                else if (action === "import") this._storageModal("import");
+                else if (action === "clear") this._clearStorage();
                 return;
             }
         });
@@ -1182,6 +1364,115 @@
         box-shadow:0 0 0 2px rgba(182,5,255,.55), 0 0 12px rgba(182,5,255,.4);
     }
     .gb-grid-slot.active:hover { background:#fff; }
+    /* ===== Pinned command button ===== */
+    .gb-cmd-btn.gb-pinned {
+        background: linear-gradient(135deg, #9147ff, #5c2d99);
+        border-color: #b605ff;
+        box-shadow: 0 0 0 2px rgba(182,5,255,.55), 0 0 12px rgba(182,5,255,.4);
+        opacity: 1;
+        color: #fff;
+    }
+    
+    /* ===== Pinned cell overlay ===== */
+    .gb-cell-pinned {
+        position: fixed;
+        pointer-events: none;
+        background: rgba(145,71,255,.3);
+        border: 2px solid rgba(145,71,255,.95);
+        box-sizing: border-box;
+        z-index: 999999;
+        display: none;
+    }
+    /* ===== Storage (localStorage) ===== */
+    .gb-storage-stats {
+        font-size: 11px;
+        line-height: 1.6;
+        margin-bottom: 10px;
+        padding: 6px 8px;
+        background: rgba(0,0,0,.3);
+        border-radius: 5px;
+        border: 1px solid #444;
+    }
+    .gb-storage-stats span { color: #8ec8ff; font-weight: bold; }
+    .gb-storage-actions {
+        display: grid;
+        grid-template-columns: 1fr 1fr 1fr;
+        gap: 6px;
+        margin-bottom: 12px;
+    }
+    .gb-storage-btn {
+        padding: 8px 6px;
+        cursor: pointer;
+        background: rgba(145,71,255,.15);
+        color: #8ec8ff;
+        border: 1px solid rgba(145,71,255,.4);
+        border-radius: 6px;
+        font-family: monospace;
+        font-size: 11px;
+        font-weight: bold;
+        transition: background .15s, color .15s, border-color .15s;
+    }
+    .gb-storage-btn:hover {
+        background: rgba(145,71,255,.3);
+        border-color: #9147ff;
+        color: #fff;
+    }
+    .gb-storage-btn:active { transform: scale(.97); }
+    .gb-storage-btn.gb-storage-danger {
+        background: rgba(255,92,92,.15);
+        border-color: rgba(255,92,92,.4);
+        color: #ff8c8c;
+    }
+    .gb-storage-btn.gb-storage-danger:hover {
+        background: rgba(255,92,92,.3);
+        border-color: #ff5c5c;
+        color: #fff;
+    }
+    
+    /* ===== Storage modal (export/import) ===== */
+    .gb-storage-modal {
+        position: fixed; inset: 0;
+        z-index: 1000010;
+        background: rgba(0,0,0,.85);
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        font-family: monospace;
+    }
+    .gb-storage-modal-box {
+        background: #1a1a1a;
+        padding: 16px;
+        border-radius: 8px;
+        width: min(700px, 90vw);
+        display: flex;
+        flex-direction: column;
+        gap: 10px;
+        border: 1px solid #444;
+        box-sizing: border-box;
+    }
+    .gb-storage-modal-title {
+        color: #9147ff;
+        font-size: 16px;
+        font-weight: bold;
+    }
+    .gb-storage-modal-text {
+        width: 100%;
+        height: 260px;
+        background: #000;
+        color: #efeff1;
+        border: 1px solid #444;
+        border-radius: 6px;
+        padding: 8px;
+        font-family: monospace;
+        font-size: 12px;
+        box-sizing: border-box;
+        resize: vertical;
+    }
+    .gb-storage-modal-actions {
+        display: flex;
+        gap: 8px;
+        justify-content: flex-end;
+    }
     `;
         document.head.appendChild(style);
     }
@@ -1211,6 +1502,7 @@
                 }
                 this._helpSnapshot = null;
             }
+            this._updateCellPinned();
 
             return;
         }
@@ -1228,6 +1520,11 @@
 
         this.zone2.dataset.shown = "1";
         if (this.info) this.info.style.display = "none";
+
+        // Help открыт — гасим hover и pinned-cell, чтобы не просвечивали.
+        if (this.hover) this.hover.style.display = "none";
+        this._hideHover();               // cellColLabel / cellRowLabel
+        if (this.cellPinned) this.cellPinned.style.display = "none";
 
         // Поднять меню из fade/Shift+3 — чтобы пользователь видел ширину zone3.
         if (menu) {
@@ -1294,20 +1591,43 @@
 
         <h3>Панель точек</h3>
         <p>Шаг 1 / 0.5 / 0.1 / 0.01 px. Точка 3 меняет размер таблицы, не ячейки.</p>
+        <p>Через 10 с бездействия сетка и панель плавно скрываются.
+        Вернуть — переместить точку, загрузить слот или Shift+3.</p>
         <hr>
 
         <h3>Команды</h3>
-        <p>Формат: <b>((Название)(команда))</b></p>
+        <p>Формат: <b>Название !команда</b> — одна команда на строку</p>
+        <p class="small dim">Допустим и двухстрочный вариант:
+            <b>Название</b> на одной строке, <b>!команда</b> — на следующей.</p>
         <ul>
             <li><b>{coord}</b> — подставляется выбранная координата</li>
         </ul>
         <p>Пример:</p>
-        <pre class="gb-code">((Башня)(!б {coord})) ((Холод)(!х {coord})) ((Улучшить)(!у))</pre>
+        <pre class="gb-code">Башня !Б 1 {coord}
+        Холод !Б 2 {coord}
+        Улучшить !у</pre>
         <p>Кнопки получат имена <b>Башня</b>, <b>Холод</b>, <b>Улучшить</b>.</p>
-        <hr>
 
         <h3>Сохранённые сетки</h3>
-        <p>Панель справа. <b>Shift+S</b> — добавить слот. Клик по слоту — загрузить.</p>
+        <p>Панель справа. Сетка <b>сохраняется автоматически</b> после установки
+        точки 3. <b>Shift+S</b> — добавить ещё слот. Клик по слоту — загрузить.</p>
+        <p>Активная сетка подсвечена белым. Удалить отдельный слот нельзя —
+        только все данные сразу: F2 → «Данные» → «Очистить».</p>
+
+        <h3>Данные (localStorage)</h3>
+        <p class="small dim">Экспорт копирует JSON в буфер. Импорт заменяет данные
+        и перезагружает страницу. Shift+Delete (выгрузка скрипта) данные
+        не трогает — стереть можно только кнопкой «Очистить».</p>
+        <div class="gb-storage-stats">
+            <div>Настройки панелей: <span id="gb-storage-layout">—</span></div>
+            <div>Сохранённые сетки: <span id="gb-storage-grids">—</span></div>
+            <div>Команды: <span id="gb-storage-commands">—</span></div>
+        </div>
+        <div class="gb-storage-actions">
+            <button type="button" class="gb-storage-btn" data-storage-action="export">📤 Экспорт</button>
+            <button type="button" class="gb-storage-btn" data-storage-action="import">📥 Импорт</button>
+            <button type="button" class="gb-storage-btn gb-storage-danger" data-storage-action="clear">🗑 Очистить</button>
+        </div>
         <hr>
 
         <h3>Горячие клавиши</h3>
@@ -1317,8 +1637,9 @@
             <tr><td>Shift+3</td><td>прозрачность</td></tr>
             <tr><td>Shift+S</td><td>сохранить сетку</td></tr>
             <tr><td>Delete</td><td>сброс сетки</td></tr>
-            <tr><td>Shift+Delete</td><td>удалить скрипт</td></tr>
+            <tr><td>Shift+Delete</td><td>выгрузить скрипт (данные сохранятся)</td></tr>
             <tr><td>F2</td><td>справка (toggle)</td></tr>
+            <tr><td>клик мимо панелей</td><td>снять выделение команды / клетки</td></tr>
         </table>
         <hr>
 
@@ -1345,6 +1666,7 @@
     `;
 
         this._fillLayoutInputs();
+        this._fillStorageStats();
     }
 
     _fillLayoutInputs() {
@@ -1391,34 +1713,26 @@
 
     _updateCommandButtonState(button, command) {
         const needsCoord = command.cmd.includes("{coord}");
-        const hasCoord = Boolean(this.state.selectedCoord);
+        const hasGrid = this.state.cols > 0 && this.state.rows > 0;
+        const cellSel = this.state.selection?.type === 'cell'
+            ? this.state.selection
+            : null;
 
-        if (needsCoord && !hasCoord) {
-            button.title = "Выберите клетку на сетке, чтобы подставить {coord}";
+        if (needsCoord && !hasGrid) {
+            button.title = "Сначала постройте сетку";
             button.classList.add("gb-cmd-needs-coord");
-        } else {
-            button.title = this._renderCommand(command.cmd);
-            button.classList.remove("gb-cmd-needs-coord");
+            return;
         }
-    }
 
-    _invalidateSelectedCoord() {
-        if (this.state.selectedCoord === null) return;
+        button.classList.remove("gb-cmd-needs-coord");
 
-        this.state.selectedCoord = null;
-
-        if (!this.state.commandsSaved) return;
-
-        this.commandsPanel
-            ?.querySelectorAll(".cmd-btn")
-            .forEach(btn => {
-                const i = Number(btn.dataset.index);
-                const command = this.state.commands[i];
-
-                if (command) {
-                    this._updateCommandButtonState(btn, command);
-                }
-            });
+        if (!needsCoord) {
+            button.title = command.cmd;
+        } else if (cellSel) {
+            button.title = `Отправить с клеткой ${cellSel.coord}`;
+        } else {
+            button.title = "Выделите команду, затем кликайте по клеткам";
+        }
     }
 
     createCommandsPanel() {
@@ -1436,24 +1750,59 @@
                 const command = this.state.commands[i];
                 if (!command) return;
 
-                // ← Блокируем, если {coord} некуда подставить
-                if (command.cmd.includes("{coord}") && !this.state.selectedCoord) {
-                    this.info.textContent =
-                        "Сначала выберите клетку на сетке — команда содержит {coord}";
+                const needsCoord = command.cmd.includes("{coord}");
+                const hasGrid = this.state.cols > 0 && this.state.rows > 0;
+
+                // Команда без {coord} — всегда сразу отправка.
+                if (!needsCoord) {
+                    this.twitchSend(this._renderCommand(command.cmd, null));
                     return;
                 }
 
-                this.twitchSend(this._renderCommand(command.cmd));
+                // С {coord}, но сетки нет — игнор.
+                if (!hasGrid) {
+                    this.info.textContent = "Сначала постройте сетку — команда содержит {coord}";
+                    return;
+                }
+
+                // Сетка есть. Выделена клетка → отправка с этой клеткой, выделение клетки оставляем.
+                if (this.state.selection?.type === 'cell') {
+                    this.twitchSend(
+                        this._renderCommand(command.cmd, this.state.selection.coord)
+                    );
+                    return;
+                }
+
+                // Выделена команда → toggle/переключение.
+                if (this.state.selection?.type === 'command') {
+                    if (this.state.selection.index === i) {
+                        this._setSelection(null);
+                        this.info.textContent = "Выделение снято";
+                    } else {
+                        this._setSelection({ type: 'command', index: i });
+                        this.info.textContent = `Команда «${command.label}» выделена`;
+                    }
+                    return;
+                }
+
+                // Ничего не выделено → выделяем команду.
+                this._setSelection({ type: 'command', index: i });
+                this.info.textContent = `Команда «${command.label}» выделена`;
                 return;
             }
 
             const edit = e.target.closest(".cmd-edit");
             if (edit) this.showCommandsEditor();
         });
-        this.showCommandsEditor();
+        if (this.state.commands.length > 0) {
+            this.showCommandsButtons();
+        } else {
+            this.showCommandsEditor();
+        }
     }
 
     showCommandsEditor() {
+        this._setSelection(null);
         this.state.commandsSaved = false;
         this.commandsPanel.innerHTML = "";
 
@@ -1462,18 +1811,26 @@
         saveButton.type = "button";
         saveButton.className = "gb-cmd-save";
 
-
-
         const textarea = document.createElement("textarea");
         textarea.placeholder =
-            "{coord} заменяется на координату;\n((Башня)(!б {coord})) ((Холод)(!х {coord})) ((Улучшить)(!у))";
-        textarea.value = this.state.commands
-            .map(c => `((${c.label})(${c.cmd}))`)
-            .join(" ");
+            "{coord} заменяется на выбранную координату.\n\n" +
+            "Формат: Название !команда (одна команда на строку)\n\n" +
+            "Башня !Б 1 {coord}\n" +
+            "Холод !Б 2 {coord}\n" +
+            "Улучшить !у";
         textarea.className = "gb-cmd-textarea";
 
+        // Защита: commandsRaw может отсутствовать (старый state) — подстрахуемся.
+        const raw = this.state.commandsRaw;
+        textarea.value = (typeof raw === "string")
+            ? raw
+            : this.state.commands
+                .map(c => `((${c.label})(${c.cmd}))`)
+                .join(" ");
+
         saveButton.addEventListener("click", () => {
-            const parsed = this._parseCommands(textarea.value);
+            const value = textarea.value;
+            const parsed = this._parseCommands(value);
 
             if (parsed.error) {
                 textarea.classList.add("gb-cmd-textarea-error");
@@ -1483,6 +1840,8 @@
 
             textarea.classList.remove("gb-cmd-textarea-error");
             this.state.commands = parsed.commands;
+            this.state.commandsRaw = value;
+            this._saveCommands(value); 
             this.state.commandsSaved = true;
             this.showCommandsButtons();
         });
@@ -1517,24 +1876,99 @@
         });
 
         this.commandsPanel.appendChild(list);
+        this._updatePinnedVisuals();
     }
 
-    _renderCommand(cmd) {
-        return this.state.selectedCoord
-            ? cmd.replace(/\{coord\}/g, this.state.selectedCoord)
-            : cmd;
+    _renderCommand(cmd, coord) {
+        return coord ? cmd.replace(/\{coord\}/g, coord) : cmd;
+    }
+    _setSelection(selection) {
+        this.state.selection = selection;
+        this._updatePinnedVisuals();
     }
 
-    setSelectedCoord(coord) {
-        this.state.selectedCoord = coord;
+    _updatePinnedVisuals() {
+        this.commandsPanel?.querySelectorAll(".cmd-btn.gb-pinned")
+            .forEach(btn => btn.classList.remove("gb-pinned"));
 
-        if (!this.state.commandsSaved) return;
+        if (this.state.selection?.type === 'command') {
+            const btn = this.commandsPanel?.querySelector(
+                `.cmd-btn[data-index="${this.state.selection.index}"]`
+            );
+            if (btn) {
+                btn.classList.add("gb-pinned");
+                btn.title = "Кликайте по клеткам — команда отправится";
+            }
+        }
 
-        this.commandsPanel.querySelectorAll(".cmd-btn").forEach(btn => {
-            const i = Number(btn.dataset.index);
-            const command = this.state.commands[i];
-            if (command) this._updateCommandButtonState(btn, command);
-        });
+        // Сбросить title у остальных, у кого раньше был pinned-заголовок.
+        this.commandsPanel?.querySelectorAll(".cmd-btn:not(.gb-pinned)")
+            .forEach(btn => {
+                const i = Number(btn.dataset.index);
+                const command = this.state.commands[i];
+                if (command) this._updateCommandButtonState(btn, command);
+            });
+
+        this._updateCellPinned();
+    }
+
+    _updateCellPinned() {
+        if (!this.cellPinned) return;
+
+        // Help открыт — не показываем (просвечивает через фон справки).
+        if (this.zone2?.dataset.shown === "1") {
+            this.cellPinned.style.display = "none";
+            return;
+        }
+
+        if (this.state.selection?.type !== 'cell') {
+            this.cellPinned.style.display = "none";
+            return;
+        }
+
+        const { x, y } = this.state.selection;
+        const { p1, cellW, cellH, cols, rows } = this.state;
+
+        if (x < 0 || y < 0 || x >= cols || y >= rows) {
+            this.cellPinned.style.display = "none";
+            return;
+        }
+
+        this.cellPinned.style.display = "block";
+        this.cellPinned.style.left = (p1.x + x * cellW) + "px";
+        this.cellPinned.style.top = (p1.y + y * cellH) + "px";
+        this.cellPinned.style.width = cellW + "px";
+        this.cellPinned.style.height = cellH + "px";
+    }
+
+    _validateSelection() {
+        if (this.state.selection?.type === 'cell') {
+            const { x, y } = this.state.selection;
+            if (x >= this.state.cols || y >= this.state.rows) {
+                this.state.selection = null;
+                this.info.textContent =
+                    "Выделенная клетка вне новой сетки — выделение снято";
+            }
+        }
+        this._updatePinnedVisuals();
+    }
+
+    _onDocumentClick(e) {
+        if (!e.isTrusted) return;          // ← программные клики игнорируем
+        if (e.target.closest?.(".gb-storage-modal")) return;
+
+        // Клик внутри наших интерактивных зон — не трогаем.
+        if (this.commandsPanel?.contains(e.target)) return;
+        if (this.layers.grid?.contains(e.target)) return;
+        if (this.resizeMenu?.contains(e.target)) return;
+        if (this.savedGridsPanel?.contains(e.target)) return;
+        if (this.zone2?.contains(e.target)) return;
+        if (this.overlay?.contains(e.target)) return;
+
+        // Клик «мимо» — снимаем выделение.
+        if (this.state.selection) {
+            this._setSelection(null);
+        }
     }
 
     onMouseMove(e) {
@@ -1619,9 +2053,9 @@
         if (number === 1) this.info.textContent = "Точка 1 выбрана. Переместите курсор в угол нажми 2";
         if (number === 2) this.info.textContent = "Точка 2 выбрана. Переместите курсор в правый нижний край нажми 3";
         if (number === 3) {
-            const old = this.state.p3 ? { ...this.state.p3 } : null;
             if (!this.createGrid()) {
-                if (old) this.state.p3 = old; else delete this.state.p3;
+                if (oldPoint) this.state.p3 = oldPoint; 
+                else delete this.state.p3;
                 this._refreshPoints();
                 return;
             }
@@ -1671,6 +2105,11 @@
         if (this.hover) {
             this.hover.remove();
             this.hover = null;
+        }
+        // Удаляем pinned.
+        if (this.cellPinned) {
+            this.cellPinned.remove();
+            this.cellPinned = null;
         }
 
         // Удаляем слой и подписи.
@@ -1863,23 +2302,14 @@
         // Снимаем выбор, но НЕ удаляем из savedGrids.
         this.state.activeGridId = null;
         this.state.gridInvisible = false;
-        this.state.selectedCoord = null;
+        this.state.selection = null;
+        this._updatePinnedVisuals();
         this.state.commandsSaved = false;
 
         this.updateSavedGridsPanel();
 
         this.info.textContent =
             "Ожидание точки 1. Наведите курсор на левый верхний угол и нажмите 1";
-    }
-    // Удаление слота — отдельная операция.
-    deleteSavedGrid(id) {
-        this.state.savedGrids = this.state.savedGrids.filter(g => g.id !== id);
-
-        if (this.state.activeGridId === id) {
-            this.state.activeGridId = null;
-        }
-        this._saveSavedGrids();
-        this.updateSavedGridsPanel();
     }
     // Справка
     showHelp() {
@@ -2083,6 +2513,8 @@
 
             return false;
         }
+        this.state.selection = null;
+        this._updatePinnedVisuals();
 
         this._finishGridSetup();
         return true;
@@ -2181,7 +2613,7 @@
             e.stopPropagation();
             this._clearFadeTimers();
             this.destroy();
-            alert("Скрипт удалён");
+            alert("Скрипт выгружен. Данные сохранены — запустите снова, чтобы восстановить.");
             return;
         }
         // 6. Блокировка при открытой справке: 1/2/3 (в т.ч. numpad), Shift+S, Delete, Shift+3
@@ -2307,15 +2739,15 @@
         // 4. Глобальные слушатели
         document.removeEventListener("mousemove", this.onMouseMove);
         document.removeEventListener("keydown", this.onKeyDown);
-
+        document.removeEventListener("click", this._onDocumentClick);
         // 5. Плеер
         this.restorePlayer();
 
-        // 6. localStorage — только то, что создали сами
-        const OWNED_KEYS = ["gb-layout", "gb-saved-grids"];
-        OWNED_KEYS.forEach(k => {
-            try { localStorage.removeItem(k); } catch { }
-        });
+        //// 6. localStorage — только то, что создали сами
+        //const OWNED_KEYS = ["gb-layout", "gb-saved-grids", "gb-commands"];
+        //OWNED_KEYS.forEach(k => {
+        //    try { localStorage.removeItem(k); } catch { }
+        //});
 
         // 7. Глобал
         if (window.gridBuilder === this) delete window.gridBuilder;
