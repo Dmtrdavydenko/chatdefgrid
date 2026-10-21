@@ -34,7 +34,7 @@
             commands: [],
             commandsRaw: null,
             commandsSaved: false,
-            selection: null, 
+            selection: null,
             overlayDisplay: "grid",
             savedGrids: [],
             activeGridId: null
@@ -66,6 +66,7 @@
         this._sendResolve = null;
         this._twitchQueue = Promise.resolve();
         this._destroyed = false;
+        this._cellFadeTimer = null;          // ← NEW
 
         // NEW: прямые ссылки на ключевые узлы.
         this.colLabels = null;
@@ -78,6 +79,7 @@
         this.createCommandsPanel();
         this.createSavedGridsPanel();
         this.createResizeMenu();
+        this._bindPanelHover();
 
         this.hidePlayer();
 
@@ -120,6 +122,62 @@
         if (window.gridBuilder === this) {
             delete window.gridBuilder;
         }
+    }
+
+    _bindPanelHover() {
+        const panels = [
+            this.commandsPanel,
+            this.resizeMenu,
+            this.savedGridsPanel
+        ].filter(Boolean);
+
+        let leaveTimer = null;
+
+        this._panelEnterHandler = () => {
+            clearTimeout(leaveTimer);
+            clearTimeout(this._cellFadeTimer);
+            this._cellFadeTimer = null;
+            this._clearFadeTimers();
+
+            // Показываем ТОЛЬКО рамку клетки, grid не трогаем.
+            if (this.state.selection?.type === 'cell' && this.cellPinned) {
+                this.cellPinned.style.transition = "none";
+                this.cellPinned.style.opacity = "1";
+            }
+        };
+
+        this._panelLeaveHandler = () => {
+            clearTimeout(leaveTimer);
+            leaveTimer = setTimeout(() => {
+                if (!this.state.visible || !this.state.cols) return;
+
+                if (!this.state.gridInvisible) {
+                    // Grid ещё видим — перезапускаем общий fade cycle.
+                    this.startGridFadeTimer();
+                    return;
+                }
+
+                // Grid уже faded — гасим через 10 с только рамку клетки.
+                if (this.state.selection?.type === 'cell' && this.cellPinned) {
+                    clearTimeout(this._cellFadeTimer);
+                    this._cellFadeTimer = setTimeout(() => {
+                        this._cellFadeTimer = null;
+                        if (this.cellPinned) {
+                            this.cellPinned.style.transition = "opacity 5s ease";
+                            this.cellPinned.style.opacity = "0";
+                        }
+                    }, 10000);
+                }
+            }, 100);
+        };
+
+        this._panelHoverPanels = panels;
+        this._panelLeaveTimerRef = () => leaveTimer;
+
+        panels.forEach(p => {
+            p.addEventListener("mouseenter", this._panelEnterHandler);
+            p.addEventListener("mouseleave", this._panelLeaveHandler);
+        });
     }
 
     // Построение сетки
@@ -231,6 +289,8 @@
                 } else {
                     this._setSelection({ type: 'cell', x, y, coord });
                     this.info.textContent = `Клетка ${coord} выделена`;
+                    if (this.state.gridInvisible) this._showCellOnly();
+                    else this.startGridFadeTimer();
                 }
                 return;
             }
@@ -238,6 +298,8 @@
             // 3. Ничего не выделено → выделяем клетку.
             this._setSelection({ type: 'cell', x, y, coord });
             this.info.textContent = `Клетка ${coord} выделена`;
+            if (this.state.gridInvisible) this._showCellOnly();
+            else this.startGridFadeTimer();
         };
 
         this._layerHandlers = { onMouseMove, onMouseLeave, onClick };
@@ -932,7 +994,7 @@
 
         // --- 5. Отправка (ждём таймер, чтобы очередь не продолжилась раньше) ---
         await new Promise(resolve => {
-            this._sendResolve = resolve; 
+            this._sendResolve = resolve;
             this._sendTimer = setTimeout(() => {
                 this._sendTimer = null;
                 this._sendResolve = null;
@@ -971,7 +1033,10 @@
             el.style.transition = "none";
             el.style.opacity = value ? "0" : "1";
         });
-
+        if (this.cellPinned) {                  // ← NEW
+            this.cellPinned.style.transition = "none";
+            this.cellPinned.style.opacity = value ? "0" : "1";
+        }
         // Меню — opacity + pointer-events.
         const menu = this.resizeMenu;
         if (menu) {
@@ -1841,7 +1906,7 @@
             textarea.classList.remove("gb-cmd-textarea-error");
             this.state.commands = parsed.commands;
             this.state.commandsRaw = value;
-            this._saveCommands(value); 
+            this._saveCommands(value);
             this.state.commandsSaved = true;
             this.showCommandsButtons();
         });
@@ -1915,6 +1980,11 @@
     _updateCellPinned() {
         if (!this.cellPinned) return;
 
+        if (!this.state.visible) {              // ← NEW
+            this.cellPinned.style.display = "none";
+            return;
+        }
+
         // Help открыт — не показываем (просвечивает через фон справки).
         if (this.zone2?.dataset.shown === "1") {
             this.cellPinned.style.display = "none";
@@ -1935,6 +2005,7 @@
         }
 
         this.cellPinned.style.display = "block";
+        this.cellPinned.style.opacity = "1";        // ← NEW: снять faded
         this.cellPinned.style.left = (p1.x + x * cellW) + "px";
         this.cellPinned.style.top = (p1.y + y * cellH) + "px";
         this.cellPinned.style.width = cellW + "px";
@@ -1999,6 +2070,7 @@
         this.state.overlayDisplay = this.overlay.style.display;
         this.overlay.style.display = "none";
         this.state.visible = false;
+        this._updateCellPinned();
     }
 
     restorePlayer() {
@@ -2018,6 +2090,7 @@
             this.state.overlayDisplay || "grid";
 
         this.state.visible = true;
+        this._updateCellPinned();
     }
     // Установка точки
     setPoint(number) {
@@ -2054,7 +2127,7 @@
         if (number === 2) this.info.textContent = "Точка 2 выбрана. Переместите курсор в правый нижний край нажми 3";
         if (number === 3) {
             if (!this.createGrid()) {
-                if (oldPoint) this.state.p3 = oldPoint; 
+                if (oldPoint) this.state.p3 = oldPoint;
                 else delete this.state.p3;
                 this._refreshPoints();
                 return;
@@ -2672,6 +2745,27 @@
         }
     }
 
+    _showCellOnly() {
+        this._clearFadeTimers();
+        this.state.gridInvisible = true;
+
+        if (this.cellPinned) {
+            this.cellPinned.style.transition = "none";
+            this.cellPinned.style.opacity = "1";
+        }
+
+        this.gridFadeFrame = requestAnimationFrame(() => {
+            this.gridFadeFrame = null;
+            this.gridFadeTimer = setTimeout(() => {
+                this.gridFadeTimer = null;
+                if (this.cellPinned) {
+                    this.cellPinned.style.transition = "opacity 5s ease";
+                    this.cellPinned.style.opacity = "0";
+                }
+            }, 10000);
+        });
+    }
+
     startGridFadeTimer() {
         this._clearFadeTimers();
         if (!this.state.visible) return;
@@ -2685,10 +2779,13 @@
             menu.style.pointerEvents = "auto";
         }
 
-        const getElements = () =>
-            this.overlay.querySelectorAll(
+        const getElements = () => {
+            const els = Array.from(this.overlay.querySelectorAll(
                 ".grid-item, .point-marker, #grid-resize-menu"
-            );
+            ));
+            if (this.cellPinned) els.push(this.cellPinned);   // ← NEW
+            return els;
+        };
 
         const elements = getElements();
         elements.forEach(el => {
@@ -2740,6 +2837,16 @@
         document.removeEventListener("mousemove", this.onMouseMove);
         document.removeEventListener("keydown", this.onKeyDown);
         document.removeEventListener("click", this._onDocumentClick);
+
+        // Hover-слушатели с панелей.
+        clearTimeout(this._panelLeaveTimerRef?.());
+        clearTimeout(this._cellFadeTimer);
+        if (this._panelHoverPanels) {
+            this._panelHoverPanels.forEach(p => {
+                p.removeEventListener("mouseenter", this._panelEnterHandler);
+                p.removeEventListener("mouseleave", this._panelLeaveHandler);
+            });
+        }
         // 5. Плеер
         this.restorePlayer();
 
