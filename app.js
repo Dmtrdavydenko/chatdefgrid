@@ -169,7 +169,6 @@
         });
     }
 
-    // Построение сетки
     createGrid() {
         const res = this._applyGeometry();
         if (res.error) return false;
@@ -1032,7 +1031,6 @@
         }
     }
 
-    // Создание слоя
     createOverlay() {
         this.overlay = document.createElement("div");
         this.overlay.id = "grid-builder-overlay";
@@ -1112,7 +1110,6 @@
 
     }
 
-    // Информационная панель
     createInfo() {
         this.info = document.createElement("div");
         this.info.className = "gb-info";
@@ -1932,6 +1929,7 @@
     _renderCommand(cmd, coord) {
         return coord ? cmd.replace(/\{coord\}/g, coord) : cmd;
     }
+
     _setSelection(selection) {
         this.state.selection = selection;
         this._updatePinnedVisuals();
@@ -2032,7 +2030,6 @@
         this.mouse.y = e.clientY;
     }
 
-    // Управление видеоплеером
     hidePlayer() {
         const el = document.querySelector(
             ".video-player__default-player"
@@ -2049,7 +2046,6 @@
         this.player.style.display = "none";
     }
 
-    //
     hidePanel() {
         if (!this.state.visible) return;
         this.state.overlayDisplay = this.overlay.style.display;
@@ -2077,7 +2073,7 @@
         this.state.visible = true;
         this._updateCellPinned();
     }
-    // Установка точки
+
     setPoint(number) {
         if (!this.state.visible) return;
         this.setGridInvisible(false);
@@ -2123,7 +2119,6 @@
         }
     }
 
-    // Создание или обновление маркера
     addPoint(p, number) {
         let el = this.overlay.querySelector(".point-marker-" + number);
 
@@ -2138,7 +2133,6 @@
         el.style.top = p.y + "px";
     }
 
-    // Очистка элементов сетки
     clearGrid() {
         // Снимаем обработчики слоя.
         if (this.layers.grid && this._layerHandlers) {
@@ -2176,7 +2170,6 @@
         this.layers.grid = null;
     }
 
-    // Русские обозначения колонок: А, Б, ... Ё, Ж ...
     cyr(num) {
         if (!Number.isFinite(num) || num < 1) return "";
         const letters = [
@@ -2197,7 +2190,6 @@
         return result;
     }
 
-    // Боковая панель перемещения точек
     createResizeMenu() {
         const prevStep = this.resizeMenu
             ? this.resizeMenu.querySelector("#grid-move-step")?.value
@@ -2333,7 +2325,6 @@
         }
     }
 
-    // Полный сброс сетки с сохранением скрипта
     clearAll() {
         this._clearFadeTimers();
 
@@ -2369,13 +2360,11 @@
         this.info.textContent =
             "Ожидание точки 1. Наведите курсор на левый верхний угол и нажмите 1";
     }
-    // Справка
+
     showHelp() {
         this.showInfo();
     }
-    // ===============================
-    // СОХРАНЕНИЕ СЕТОК
-    // ===============================
+
     saveCurrentGrid() {
         const { p1, p2, p3, cols, rows } = this.state;
 
@@ -2450,7 +2439,6 @@
         console.log("Создан новый слот:", grid);
     }
 
-    // Название сетки.
     getGridName(grid = null) {
 
         if (!grid) {
@@ -2484,7 +2472,6 @@
         return `${this.cyr(cols)}${rows}`;
     }
 
-    // Автоматическое обновление активной сетки
     updateActiveGrid() {
         if (this.state.activeGridId === null) return;
 
@@ -2506,7 +2493,6 @@
         this.updateSavedGridsPanel();
     }
 
-    // Загрузить сохранённую сетку
     loadGrid(grid) {
         if (typeof grid === "number") {
             grid = this.state.savedGrids.find(g => g.id === grid);
@@ -2578,7 +2564,6 @@
         return true;
     }
 
-    // HTML-панель сохранённых сеток
     createSavedGridsPanel() {
         if (this.savedGridsPanel) return;
 
@@ -2598,7 +2583,6 @@
         this.updateSavedGridsPanel();
     }
 
-    // Обновить HTML кнопок
     updateSavedGridsPanel() {
         if (!this.savedGridsPanel) return;
         this._rebuildSavedGridsPanel(this.savedGridsPanel);
@@ -2802,7 +2786,6 @@
         });
     }
 
-    // Полное удаление класса и его обработчиков
     destroy() {
         // 1. Таймеры
         this._destroyed = true;
