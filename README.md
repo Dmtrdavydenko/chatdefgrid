@@ -1,5 +1,5 @@
 ﻿# chatdefgrid
-![app](grid.png)
+![app](view.png)
 
 ### Build a Grid Using the Browser Console (F12)
 
