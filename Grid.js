@@ -139,10 +139,8 @@
             this._cellFadeTimer = null;
             this._clearFadeTimers();
 
-            // Показываем ТОЛЬКО рамку клетки, grid не трогаем.
-            if (this.state.selection?.type === 'cell' && this.cellPinned) {
-                this.cellPinned.style.transition = "none";
-                this.cellPinned.style.opacity = "1";
+            if (this.state.selection?.type === 'cell') {
+                this._showCellPinned();
             }
         };
 
@@ -152,21 +150,12 @@
                 if (!this.state.visible || !this.state.cols) return;
 
                 if (!this.state.gridInvisible) {
-                    // Grid ещё видим — перезапускаем общий fade cycle.
                     this.startGridFadeTimer();
                     return;
                 }
 
-                // Grid уже faded — гасим через 10 с только рамку клетки.
-                if (this.state.selection?.type === 'cell' && this.cellPinned) {
-                    clearTimeout(this._cellFadeTimer);
-                    this._cellFadeTimer = setTimeout(() => {
-                        this._cellFadeTimer = null;
-                        if (this.cellPinned) {
-                            this.cellPinned.style.transition = "opacity 5s ease";
-                            this.cellPinned.style.opacity = "0";
-                        }
-                    }, 10000);
+                if (this.state.selection?.type === 'cell') {
+                    this._scheduleCellPinnedFade();
                 }
             }, 100);
         };
@@ -289,8 +278,7 @@
                 } else {
                     this._setSelection({ type: 'cell', x, y, coord });
                     this.info.textContent = `Клетка ${coord} выделена`;
-                    if (this.state.gridInvisible) this._showCellOnly();
-                    else this.startGridFadeTimer();
+                    this._startFadeForSelection();
                 }
                 return;
             }
@@ -298,8 +286,7 @@
             // 3. Ничего не выделено → выделяем клетку.
             this._setSelection({ type: 'cell', x, y, coord });
             this.info.textContent = `Клетка ${coord} выделена`;
-            if (this.state.gridInvisible) this._showCellOnly();
-            else this.startGridFadeTimer();
+            this._startFadeForSelection();
         };
 
         this._layerHandlers = { onMouseMove, onMouseLeave, onClick };
@@ -1623,7 +1610,6 @@
         this.zone2.innerHTML = `
     <div class="gb-help">
         <h2>chatdefgrid</h2>
-        <div class="dim">Сетка координат для браузера · F12</div>
         <div class="dim">Скрыть вкладки браузера · F11</div>
         <div class="dim">Скрыть оверлей · Shift + 1</div>
         <button class="gb-theatre-btn" type="button" title="Переключить режим кинотеатра">
@@ -2748,22 +2734,30 @@
     _showCellOnly() {
         this._clearFadeTimers();
         this.state.gridInvisible = true;
+        this._showCellPinned();
+        this._scheduleCellPinnedFade();
+    }
 
-        if (this.cellPinned) {
-            this.cellPinned.style.transition = "none";
-            this.cellPinned.style.opacity = "1";
-        }
+    _showCellPinned() {
+        if (!this.cellPinned) return;
+        this.cellPinned.style.transition = "none";
+        this.cellPinned.style.opacity = "1";
+    }
 
-        this.gridFadeFrame = requestAnimationFrame(() => {
-            this.gridFadeFrame = null;
-            this.gridFadeTimer = setTimeout(() => {
-                this.gridFadeTimer = null;
-                if (this.cellPinned) {
-                    this.cellPinned.style.transition = "opacity 5s ease";
-                    this.cellPinned.style.opacity = "0";
-                }
-            }, 10000);
-        });
+    _scheduleCellPinnedFade() {
+        clearTimeout(this._cellFadeTimer);
+        this._cellFadeTimer = setTimeout(() => {
+            this._cellFadeTimer = null;
+            if (this.cellPinned) {
+                this.cellPinned.style.transition = "opacity 5s ease";
+                this.cellPinned.style.opacity = "0";
+            }
+        }, 10000);
+    }
+
+    _startFadeForSelection() {
+        if (this.state.gridInvisible) this._showCellOnly();
+        else this.startGridFadeTimer();
     }
 
     startGridFadeTimer() {
