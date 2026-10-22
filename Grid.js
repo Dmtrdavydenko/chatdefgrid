@@ -1008,7 +1008,6 @@
             }, 200 + Math.random() * 200);   // 200–400 мс
         });
     }
-    //twitchSend("!профиль");
 
     setGridInvisible(value) {
         this._clearFadeTimers();
